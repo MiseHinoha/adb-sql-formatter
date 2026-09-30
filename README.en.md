@@ -146,5 +146,6 @@ not a pass. `npm test` never needs a corpus and always runs.
 
 ## License
 
-MIT, see `LICENSE`. The bundled sql-formatter is MIT as well; its copyright notice ships in
-`node_modules/sql-formatter/LICENSE`.
+MIT, see `LICENSE`. The bundled `sql-formatter` is MIT as well; the list of third-party components and
+where their license texts live is in `THIRD_PARTY_NOTICES.md`, and each notice ships inside the package
+under `node_modules/<package>/LICENSE`.

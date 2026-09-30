@@ -130,5 +130,5 @@ npm run package          # vsce 打包 vsix
 
 ## 许可
 
-MIT，见 `LICENSE`。依赖的 sql-formatter 同为 MIT，其版权声明保留在
-`node_modules/sql-formatter/LICENSE`。
+MIT，见 `LICENSE`。依赖的 sql-formatter 同为 MIT；第三方组件与其版权声明原文清单见
+`THIRD_PARTY_NOTICES.md`，声明文件随包分发在 `node_modules/<包名>/LICENSE`。
