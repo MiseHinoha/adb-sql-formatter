@@ -1,0 +1,5 @@
+{
+	"Missing semicolon after the previous statement: a multi-statement file without it is parsed as a single statement by the platform and fails with a syntax error. Click the lightbulb on the squiggle to insert one.": "上一条语句末尾缺少分号：多语句文件在平台上会被当成一条语句解析，直接语法错。用鼠标点波浪线处的灯泡图标即可补上。",
+	"Insert semicolon": "插入分号",
+	"Insert semicolon and a blank line": "插入分号并空一行"
+}

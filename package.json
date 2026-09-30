@@ -1,0 +1,98 @@
+{
+	"name": "adb-sql-formatter",
+	"displayName": "ADB SQL Formatter",
+	"description": "ADB / AnalyticDB MySQL flavored SQL formatter for VS Code: lowercase keywords, leading commas, tab indent, DataGrip-style clause breaks, one option per line in CREATE TABLE, ${bizdate} aware. Formats on save.",
+	"version": "1.4.0",
+	"publisher": "YipTszkwan",
+	"license": "MIT",
+	"icon": "images/icon.png",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/MiseHinoha/adb-sql-formatter.git"
+	},
+	"homepage": "https://github.com/MiseHinoha/adb-sql-formatter#readme",
+	"engines": {
+		"vscode": "^1.70.0"
+	},
+	"categories": [
+		"Formatters",
+		"Programming Languages"
+	],
+	"activationEvents": [
+		"onLanguage:sql",
+		"onLanguage:mysql"
+	],
+	"main": "./extension.js",
+	"contributes": {
+		"configuration": {
+			"title": "ADB SQL Formatter",
+			"properties": {
+				"adbSqlFormatter.keywordCase": {
+					"type": "string",
+					"enum": [
+						"lower",
+						"upper",
+						"preserve"
+					],
+					"default": "lower",
+					"description": "%adbSqlFormatter.keywordCase%"
+				},
+				"adbSqlFormatter.expressionWidth": {
+					"type": "number",
+					"default": 100,
+					"description": "%adbSqlFormatter.expressionWidth%"
+				},
+				"adbSqlFormatter.logicalOperatorNewline": {
+					"type": "string",
+					"enum": [
+						"before",
+						"after"
+					],
+					"default": "before",
+					"description": "%adbSqlFormatter.logicalOperatorNewline%"
+				},
+				"adbSqlFormatter.linesBetweenQueries": {
+					"type": "number",
+					"default": 1,
+					"description": "%adbSqlFormatter.linesBetweenQueries%"
+				},
+				"adbSqlFormatter.requireSemicolonBetweenStatements": {
+					"type": "boolean",
+					"default": true,
+					"description": "%adbSqlFormatter.requireSemicolonBetweenStatements%"
+				},
+				"adbSqlFormatter.missingSemicolonSeverity": {
+					"type": "string",
+					"enum": [
+						"warning",
+						"error"
+					],
+					"default": "warning",
+					"description": "%adbSqlFormatter.missingSemicolonSeverity%"
+				}
+			}
+		}
+	},
+	"dependencies": {
+		"sql-formatter": "^13.1.0"
+	},
+	"scripts": {
+		"test": "node test-selfcheck.js && node test-semi-detect.js && node test-extension.js",
+		"test:real": "node check-ddl.js",
+		"test:ab": "node ab-format.js",
+		"test:semi-scan": "node scan-semicolon.js",
+		"package": "vsce package"
+	},
+	"keywords": [
+		"sql",
+		"formatter",
+		"adb",
+		"analyticdb",
+		"mysql",
+		"dataworks",
+		"leading-comma"
+	],
+	"bugs": {
+		"url": "https://github.com/MiseHinoha/adb-sql-formatter/issues"
+	}
+}

@@ -1,0 +1,8 @@
+{
+	"adbSqlFormatter.keywordCase": "关键字大小写",
+	"adbSqlFormatter.expressionWidth": "单行最大宽度，超出后表达式列表按逗号前置换行",
+	"adbSqlFormatter.logicalOperatorNewline": "and / or 换行位置",
+	"adbSqlFormatter.linesBetweenQueries": "多条 SQL 之间的空行数",
+	"adbSqlFormatter.requireSemicolonBetweenStatements": "文件里存在 2 条及以上语句时，检查上一条语句末尾是否用分号截断（只有 1 条语句的文件不检查）。格式化器永不自动补分号。",
+	"adbSqlFormatter.missingSemicolonSeverity": "缺分号提示的级别：黄色波浪线（warning）或红色（error）"
+}

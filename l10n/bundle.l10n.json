@@ -1,0 +1,5 @@
+{
+	"Missing semicolon after the previous statement: a multi-statement file without it is parsed as a single statement by the platform and fails with a syntax error. Click the lightbulb on the squiggle to insert one.": "Missing semicolon after the previous statement: a multi-statement file without it is parsed as a single statement by the platform and fails with a syntax error. Click the lightbulb on the squiggle to insert one.",
+	"Insert semicolon": "Insert semicolon",
+	"Insert semicolon and a blank line": "Insert semicolon and a blank line"
+}

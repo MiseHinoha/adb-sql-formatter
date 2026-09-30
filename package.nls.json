@@ -1,0 +1,8 @@
+{
+	"adbSqlFormatter.keywordCase": "Keyword letter case.",
+	"adbSqlFormatter.expressionWidth": "Maximum width of a single line. Expression lists break at leading commas once the line is longer than this.",
+	"adbSqlFormatter.logicalOperatorNewline": "Where to break the line for `and` / `or`.",
+	"adbSqlFormatter.linesBetweenQueries": "Number of blank lines between statements.",
+	"adbSqlFormatter.requireSemicolonBetweenStatements": "Check that every non-final statement ends with a semicolon when the file holds 2 or more statements (files with a single statement are not checked). The formatter never adds semicolons on its own.",
+	"adbSqlFormatter.missingSemicolonSeverity": "Severity of the missing-semicolon hint: yellow squiggle (warning) or red (error)."
+}

@@ -1,0 +1,7 @@
+node_modules/
+.tmp/
+.trash/
+*.vsix
+.vscode-test/
+npm-debug.log*
+*.zip
