@@ -118,6 +118,8 @@ npm run package          # vsce 打包 vsix
 - `test-selfcheck.js` 用 `test/fixtures/` 下的脱敏样本自测，不依赖外部脚本仓
 - `test-extension.js` 用最小 vscode API 桩跑真实 activate 链路，验证诊断与 quick fix
 
+打包与发布流程见 `RELEASING.md`（Marketplace 上架走 trusted publishing，不存 PAT）。
+
 ## 已知边界
 
 - 补进方言函数表的 ADB 函数名与其它函数名同待遇，会跟随 `keywordCase`：默认 `lower` 下

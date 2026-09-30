@@ -131,6 +131,9 @@ not a pass. `npm test` never needs a corpus and always runs.
 - `test-extension.js` drives the real `activate()` path through a minimal vscode API stub to verify
   diagnostics and quick fixes
 
+Packaging and publishing are documented in `RELEASING.md` (the Marketplace publish goes through
+trusted publishing — no PAT is stored anywhere).
+
 ## Known limits
 
 - ADB function names added to the dialect's function table are treated like any other function name

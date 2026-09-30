@@ -1,0 +1,70 @@
+name: Publish
+
+# 两条触发路径：
+#   1) 打 tag（如 v1.4.0）→ 自测 → 打包 → 发 Marketplace → 建同名 GitHub Release 并挂上 vsix
+#   2) 手动触发 → 默认只验证 OIDC 凭据链，不上架（拿已发布的版本号去撞 --skip-duplicate）
+#
+# 认证走 trusted publishing（OIDC），不存任何 PAT：
+#   vsce 向 GitHub 要一个 audience=marketplace.visualstudio.com 的 OIDC token，
+#   再拿它到 Marketplace 换短期凭据。前置条件是 Marketplace 侧给 publisher 配好
+#   trusted publishing policy（仓库 + workflow 文件名），见 RELEASING.md。
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      verify_only:
+        description: '只验证 OIDC 凭据链、不上架（需该版本已存在于 Marketplace）'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Package and publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # 建 GitHub Release 并挂 vsix
+      id-token: write # 换 Marketplace 短期凭据，缺它 vsce 会直接报错
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 装依赖
+        run: npm ci
+
+      - name: 仓内自测（脱敏样本，不需要语料仓）
+        run: npm test
+
+      - name: 校验 tag 与 package.json 版本一致
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          V=$(node -p "require('./package.json').version")
+          if [ "v$V" != "${GITHUB_REF_NAME}" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} 与 package.json 的 v$V 不一致"
+            exit 1
+          fi
+
+      - name: 打包
+        run: npx --yes @vscode/vsce package
+
+      - name: 发布到 VS Code Marketplace
+        if: ${{ !inputs.verify_only }}
+        run: npx --yes @vscode/vsce publish --oidc --packagePath ./*.vsix
+
+      - name: 仅验证凭据链（不上架）
+        if: ${{ inputs.verify_only }}
+        run: npx --yes @vscode/vsce publish --oidc --skip-duplicate --packagePath ./*.vsix
+
+      - name: 建 GitHub Release 并挂上 vsix
+        if: startsWith(github.ref, 'refs/tags/') && !inputs.verify_only
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" ./*.vsix --title "${GITHUB_REF_NAME}" --generate-notes --verify-tag
