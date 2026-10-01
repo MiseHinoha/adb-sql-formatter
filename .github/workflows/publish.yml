@@ -58,9 +58,23 @@ jobs:
       - name: 打包（输出到 dist/）
         run: npm run package
 
+      # Marketplace 侧的 trusted publishing policy 入口尚未开放（见 RELEASING.md）。
+      # 在仓库变量 MARKETPLACE_TRUSTED_PUBLISHING 设为 true 之前，推 tag 只做「自测 + 打包 + GitHub Release」，
+      # 不尝试发市场 —— 否则每次打 tag 都会得到一个红色 CI。
       - name: 发布到 VS Code Marketplace
-        if: ${{ !inputs.verify_only }}
+        if: ${{ !inputs.verify_only && vars.MARKETPLACE_TRUSTED_PUBLISHING == 'true' }}
         run: npx --yes @vscode/vsce@4.0.1-1 publish --oidc --packagePath dist/*.vsix
+
+      - name: 说明：本次跳过 Marketplace 发布
+        if: ${{ !inputs.verify_only && vars.MARKETPLACE_TRUSTED_PUBLISHING != 'true' }}
+        run: |
+          {
+            echo "### 已跳过 Marketplace 发布（按设计）"
+            echo ""
+            echo "- 原因：trusted publishing 的 trust policy 入口尚未对 publisher 开放。"
+            echo "- 现在怎么发：手工上传 \`dist/*.vsix\` —— publisher 页面 → 扩展行 ⋮ → Update（见 RELEASING.md 通道一）。"
+            echo "- 入口开放后：把仓库变量 \`MARKETPLACE_TRUSTED_PUBLISHING\` 设为 \`true\`，本步骤即换成真正的发布。"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: 仅验证凭据链（不上架）
         if: ${{ inputs.verify_only }}

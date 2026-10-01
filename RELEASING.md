@@ -23,20 +23,31 @@ npm run package          # 输出到 dist/adb-sql-formatter-<版本>.vsix
 
 1. 登录 <https://marketplace.visualstudio.com/manage/publishers/YipTszkwan>；
 2. 给这个 publisher 配置 trusted publishing policy，指向仓库 `MiseHinoha/adb-sql-formatter`
-   与 workflow 文件名 `publish.yml`；
-3. 之后 `git tag v1.4.0 && git push origin v1.4.0` 就会自动：跑 `npm test` → 校验 tag 与
+   与 workflow 文件名 `publish.yml`（要是表单里还要求填 Environment，就把环境名一并写进工作流）；
+3. 把仓库变量 `MARKETPLACE_TRUSTED_PUBLISHING` 设为 `true`（Settings → Secrets and variables →
+   Actions → Variables）；
+4. 之后 `git tag v1.5.1 && git push origin v1.5.1` 就会自动：跑 `npm test` → 校验 tag 与
    `package.json` 版本一致 → 打包 → 发 Marketplace → 建同名 GitHub Release 并挂上 vsix。
+
+> **当前状态（2026-10）：第 1、2 步还做不了** —— Marketplace 侧**没有放出 trust policy 的配置入口**，
+> 服务端对这类请求直接回 `Trusted Publishing is not supported.`（其它 publisher 同样如此：
+> `microsoft/vsmarketplace#1422`、`JuanTorchia/certificate-viewer-open-vscode#85`）。
+> 所以现在用**通道一**（手工上传）发版；工作流里「发市场」那一步由仓库变量把关，
+> 未设为 `true` 时 tag 只做自测 + 打包 + 建 GitHub Release，并在运行摘要里说明跳过了发布
+> —— 这样打 tag 不会再出红色 CI。入口一旦开放：按上面 1–3 步配好、设变量，就恢复全自动。
 
 **为什么不用 PAT**：Azure DevOps 的全局 Personal Access Token 于 **2026-12-01 退役**，
 现在建 PAT 等于给自己埋一个到期日。trusted publishing 走 OIDC：workflow 向 GitHub 要一个
 `audience=marketplace.visualstudio.com` 的 OIDC token，再由 `vsce` 换成短期 Marketplace 凭据，
 仓库里不存任何长期密钥（`vsce` 目前只支持 GitHub Actions 作为 OIDC 提供方，其他 CI 不行）。
 
-### 配好 policy 之前先验证一次
+### 入口开放后，先验证一次再真发
 
 `Actions → Publish → Run workflow`，保持 `verify_only = true`：它会用**已经发布过的版本号**
 加 `--skip-duplicate` 去撞一次，认证链走通就成功退出、不会改动任何已上架内容。
 这样能在真发布之前确认 policy、`id-token: write`、工作流文件名三处都对得上。
+
+> 现在跑这一步会红（policy 入口还没开），属于预期现象，不是配置写错。
 
 ## 版本号规则
 
