@@ -55,19 +55,19 @@ jobs:
       # 钉住 vsce 版本：4.0.0 的 --oidc 交换请求没带 api-version，Marketplace 会返回
       # 'No api-version was supplied for the POST request' (400)；4.0.1-1 起已修。
       # 等 4.0.1 正式版发布后可以把这里换成 @4.0.1。
-      - name: 打包
-        run: npx --yes @vscode/vsce@4.0.1-1 package
+      - name: 打包（输出到 dist/）
+        run: npm run package
 
       - name: 发布到 VS Code Marketplace
         if: ${{ !inputs.verify_only }}
-        run: npx --yes @vscode/vsce@4.0.1-1 publish --oidc --packagePath ./*.vsix
+        run: npx --yes @vscode/vsce@4.0.1-1 publish --oidc --packagePath dist/*.vsix
 
       - name: 仅验证凭据链（不上架）
         if: ${{ inputs.verify_only }}
-        run: npx --yes @vscode/vsce@4.0.1-1 publish --oidc --skip-duplicate --packagePath ./*.vsix
+        run: npx --yes @vscode/vsce@4.0.1-1 publish --oidc --skip-duplicate --packagePath dist/*.vsix
 
       - name: 建 GitHub Release 并挂上 vsix
         if: startsWith(github.ref, 'refs/tags/') && !inputs.verify_only
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${GITHUB_REF_NAME}" ./*.vsix --title "${GITHUB_REF_NAME}" --generate-notes --verify-tag
+        run: gh release create "${GITHUB_REF_NAME}" dist/*.vsix --title "${GITHUB_REF_NAME}" --generate-notes --verify-tag

@@ -201,7 +201,7 @@ npm test                 # 仓内自测：脱敏样本 + 语句切分单测 + �
 npm run test:real        # 全量校准：扫描真实 SQL 脚本仓的建表语句
 npm run test:ab          # 改动前后 A/B：真实语料逐文件比对，排版不许动到代码
 npm run test:semi-scan   # 语料统计：多语句文件的缺分号断点分布
-npm run package          # vsce 打包 vsix
+npm run package          # vsce 打包 vsix（输出到 dist/）
 ```
 
 `test:real` 需要指向存放 SQL 脚本的仓库根，按优先级任选：

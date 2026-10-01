@@ -227,7 +227,7 @@ npm test                 # in-repo self test: sanitized fixtures + statement spl
 npm run test:real        # full calibration against CREATE TABLE statements in a real SQL script repo
 npm run test:ab          # A/B before/after: per-file comparison over real corpus, layout must not touch code
 npm run test:semi-scan   # corpus stats: where multi-statement files miss their semicolons
-npm run package          # vsce package
+npm run package          # vsce package (writes to dist/)
 ```
 
 `test:real` needs the root of the repo holding your SQL scripts. Pick one, in this order:

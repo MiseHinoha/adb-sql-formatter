@@ -6,11 +6,11 @@
 ## 通道一：手动上传 vsix（首发、应急用）
 
 ```
-npx @vscode/vsce package
+npm run package          # 输出到 dist/adb-sql-formatter-<版本>.vsix
 ```
 
 然后到 <https://marketplace.visualstudio.com/manage/publishers/YipTszkwan> →
-`New extension → Visual Studio Code` → 拖入 `adb-sql-formatter-<版本>.vsix`。
+`New extension → Visual Studio Code` → 拖入 `dist/adb-sql-formatter-<版本>.vsix`。
 不需要任何凭据，只要用拥有该 publisher 的微软账号登录。
 
 ## 通道二：打 tag 自动发布（长期方案，见 `.github/workflows/publish.yml`）

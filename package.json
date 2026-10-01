@@ -126,7 +126,7 @@
 		"test:real": "node check-ddl.js",
 		"test:ab": "node ab-format.js",
 		"test:semi-scan": "node scan-semicolon.js",
-		"package": "vsce package"
+		"package": "mkdir -p dist && npx --yes @vscode/vsce package --out dist/"
 	},
 	"keywords": [
 		"sql",

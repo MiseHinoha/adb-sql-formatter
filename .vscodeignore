@@ -17,6 +17,7 @@ debug-one.js
 test/**
 .tmp/**
 .trash/**
+dist/**
 vibe_images/**
 images/**/*.md
 images/icon-128.png
