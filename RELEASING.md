@@ -15,6 +15,10 @@ npx @vscode/vsce package
 
 ## 通道二：打 tag 自动发布（长期方案，见 `.github/workflows/publish.yml`）
 
+> 已知坑：`vsce` **4.0.0** 的 `--oidc` 在换 Marketplace 凭据时请求没带 `api-version`，会直接 400
+> （`No api-version was supplied for the POST request`）。`4.0.1-1` 起已修（URL 补 `?api-version=7.2-preview.1`），
+> 工作流里已钉住该版本；等 4.0.1 正式版出来可以换成 `@4.0.1`。
+
 前置条件（只需配一次，在 Marketplace 网页上做）：
 
 1. 登录 <https://marketplace.visualstudio.com/manage/publishers/YipTszkwan>；
