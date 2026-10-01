@@ -2,7 +2,7 @@
 	"name": "adb-sql-formatter",
 	"displayName": "ADB SQL Formatter",
 	"description": "ADB / AnalyticDB MySQL flavored SQL formatter for VS Code: lowercase keywords, leading commas, tab indent, DataGrip-style clause breaks, one option per line in CREATE TABLE, ${bizdate} aware. Formats on save.",
-	"version": "1.4.0",
+	"version": "1.5.0",
 	"publisher": "YipTszkwan",
 	"license": "MIT",
 	"icon": "images/icon.png",
@@ -19,11 +19,37 @@
 		"Programming Languages"
 	],
 	"activationEvents": [
+		"onCommand:adbSqlFormatter.formatDocument",
 		"onLanguage:sql",
-		"onLanguage:mysql"
+		"onLanguage:mysql",
+		"onCommand:adbSqlFormatter.formatAndSave"
 	],
 	"main": "./extension.js",
 	"contributes": {
+		"commands": [
+			{
+				"command": "adbSqlFormatter.formatDocument",
+				"title": "%adbSqlFormatter.command.formatDocument%"
+			},
+			{
+				"command": "adbSqlFormatter.formatAndSave",
+				"title": "%adbSqlFormatter.command.formatAndSave%"
+			}
+		],
+		"keybindings": [
+			{
+				"command": "adbSqlFormatter.formatAndSave",
+				"key": "ctrl+s",
+				"mac": "cmd+s",
+				"when": "adbSqlFormatter.takeOverSaveKey && editorTextFocus && !editorReadonly && editorLangId == sql"
+			},
+			{
+				"command": "adbSqlFormatter.formatAndSave",
+				"key": "ctrl+s",
+				"mac": "cmd+s",
+				"when": "adbSqlFormatter.takeOverSaveKey && editorTextFocus && !editorReadonly && editorLangId == mysql"
+			}
+		],
 		"configuration": {
 			"title": "ADB SQL Formatter",
 			"properties": {
@@ -69,8 +95,27 @@
 					],
 					"default": "warning",
 					"description": "%adbSqlFormatter.missingSemicolonSeverity%"
+				},
+				"adbSqlFormatter.formatOnSave": {
+					"type": "boolean",
+					"default": false,
+					"description": "%adbSqlFormatter.formatOnSave%"
+				},
+				"adbSqlFormatter.takeOverSaveKey": {
+					"type": "boolean",
+					"default": true,
+					"description": "%adbSqlFormatter.takeOverSaveKey%"
 				}
 			}
+		},
+		"menus": {
+			"editor/context": [
+				{
+					"command": "adbSqlFormatter.formatDocument",
+					"when": "editorLangId == sql || editorLangId == mysql",
+					"group": "1_modification@9"
+				}
+			]
 		}
 	},
 	"dependencies": {

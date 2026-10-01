@@ -4,5 +4,9 @@
 	"adbSqlFormatter.logicalOperatorNewline": "Where to break the line for `and` / `or`.",
 	"adbSqlFormatter.linesBetweenQueries": "Number of blank lines between statements.",
 	"adbSqlFormatter.requireSemicolonBetweenStatements": "Check that every non-final statement ends with a semicolon when the file holds 2 or more statements (files with a single statement are not checked). The formatter never adds semicolons on its own.",
-	"adbSqlFormatter.missingSemicolonSeverity": "Severity of the missing-semicolon hint: yellow squiggle (warning) or red (error)."
+	"adbSqlFormatter.missingSemicolonSeverity": "Severity of the missing-semicolon hint: yellow squiggle (warning) or red (error).",
+	"adbSqlFormatter.formatOnSave": "Format sql / mysql files on save — the single switch for it. While it is off nothing reformats your files on save (the extension also turns the editor's own editor.formatOnSave off for sql / mysql, since that is a separate path it cannot block at runtime). Manual formatting is never affected: Shift+Alt+F, the context menu, or the Command Palette.",
+	"adbSqlFormatter.takeOverSaveKey": "Take over Ctrl+S / Cmd+S inside sql / mysql editors: format the document, then save it. Turn this off if another keymap should own that key (and use the command \"Format and Save\" or another binding instead).",
+	"adbSqlFormatter.command.formatAndSave": "Format and Save",
+	"adbSqlFormatter.command.formatDocument": "Format Document (ADB SQL Formatter)"
 }

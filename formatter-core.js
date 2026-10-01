@@ -49,16 +49,24 @@ function buildDialect() {
 	};
 }
 
-// 空格缩进转 tab。sql-formatter 要求 commaPosition=before 必须用空格，
-// 故先按 tabWidth 空格排版再转换；逗号行的缩进是 缩进-2 空格，用 round 归位到同级。
+// 空格缩进转 tab。sql-formatter 要求 commaPosition=before 必须用空格，故先按 tabWidth 空格排版再转换。
+// 逗号行比同级内容行少缩进 2 列（commaPosition=before 的固定行为，实测 tabWidth=2/3/4/8 均成立）：
+// 折算时补回这 2 列，否则 tabWidth≠4 时（VS Code 的 detectIndentation 常给到 2）逗号行会落到 0 缩进，
+// 表现为「select 之后只有第一个字段有缩进，后面的字段没缩进」。
+// tabWidth=2 时逗号行本身就是 0 缩进（连空白都没有），故按行处理，不能只匹配已有缩进的行。
 function toTabs(text, tabWidth) {
-	return text.replace(/^[ \t]+/gm, (m) => {
-		const width = [...m].reduce((n, ch) => n + (ch === '\t' ? tabWidth : 1), 0);
-		const tabs = width % tabWidth === 2
-			? Math.round(width / tabWidth)
-			: Math.floor(width / tabWidth);
-		return '\t'.repeat(tabs);
-	});
+	return text
+		.split('\n')
+		.map((line) => {
+			const m = line.match(/^[ 	]*/)[0];
+			const rest = line.slice(m.length);
+			if (!m && !rest.startsWith(',')) return line;
+			const width = [...m].reduce((n, ch) => n + (ch === '	' ? tabWidth : 1), 0);
+			// 内容行向下取整（宁可少缩进也不多缩进），逗号行按补齐后的列数取最接近的整数级
+			const level = rest.startsWith(',') ? (width + 2) / tabWidth : width / tabWidth;
+			return '	'.repeat(Math.max(0, Math.round(level))) + rest;
+		})
+		.join('\n');
 }
 
 // 短列表行内合并：group by / order by 后面按逗号前置换行的列表，
@@ -95,6 +103,256 @@ function joinShortLists(text, limit) {
 		out.push(raw);
 	}
 	return out.join('\n');
+}
+
+// 窗口子句不换行：`row_number() over (` 之后被 sql-formatter 拆成多行的 partition by / order by
+// 合回一行 —— 窗口里一般不会写很长，只有整行超过 expressionWidth 时才保持拆开的多行形态。
+// 引号外的空白压成单空格（引号内原样），并在 , 与 ) 前不留空格。
+function flattenSpec(text) {
+	let out = '';
+	let quote = null;
+	let pending = false;
+	for (let i = 0; i < text.length; i++) {
+		const c = text[i];
+		if (quote) {
+			out += c;
+			if (c === quote && text[i - 1] !== '\\') quote = null;
+			continue;
+		}
+		if (c === "'" || c === '"' || c === '`') {
+			quote = c;
+			pending = false;
+			out += c;
+			continue;
+		}
+		if (/\s/.test(c)) {
+			pending = true;
+			continue;
+		}
+		if (c === ',' || c === ')') {
+			out = out.replace(/[ 	]+$/, '');
+			pending = false;
+			out += c;
+			continue;
+		}
+		if (pending && out && !out.endsWith('(')) out += ' ';
+		pending = false;
+		out += c;
+	}
+	return out;
+}
+
+function inlineWindowSpecs(text, limit) {
+	const lines = text.split('\n');
+	const out = [];
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i];
+		// 只处理「整行以 over ( 收尾」的形态：已经在一行里的窗口子句不用动
+		if (!/\bover\s*\(\s*$/i.test(line)) {
+			out.push(line);
+			continue;
+		}
+		const openIdx = line.lastIndexOf('(');
+		let depth = 0;
+		let closeIdx = -1;
+		let blocked = false;
+		let j = i;
+		// 找到配对的右括号所在行；break 只跳内层，必须用 found 结束外层
+		while (j < lines.length && !blocked && closeIdx < 0) {
+			const seg = j === i ? line.slice(openIdx) : lines[j];
+			for (let k = 0; k < seg.length; k++) {
+				const c = seg[k];
+				if (c === "'" || c === '"' || c === '`') {
+					const q = c;
+					k++;
+					while (k < seg.length && seg[k] !== q) k++;
+					continue;
+				}
+				// 带注释的窗口子句没法安全合并成一行，原样保留
+				if ((c === '-' && seg[k + 1] === '-') || (c === '/' && seg[k + 1] === '*')) {
+					blocked = true;
+					break;
+				}
+				if (c === '(') depth++;
+				else if (c === ')' && --depth === 0) {
+					closeIdx = k;
+					break;
+				}
+			}
+			j++;
+		}
+		if (blocked || closeIdx < 0) {
+			out.push(line);
+			continue;
+		}
+		const last = j - 1;
+		const parts = [line.slice(openIdx)];
+		for (let k = i + 1; k < last; k++) parts.push(lines[k]);
+		parts.push(lines[last].slice(0, closeIdx + 1));
+		const single = (
+			line.slice(0, openIdx) + flattenSpec(parts.join(' ')) + lines[last].slice(closeIdx + 1)
+		).replace(/[ 	]+$/, '');
+		if (single.trim().length > limit) {
+			out.push(line);
+			continue;
+		}
+		out.push(single);
+		i = last;
+	}
+	return out.join('\n');
+}
+
+// 建表关键字纵向对齐（纯空白补齐，不动任何内容）
+//   列定义：名称 / 类型 / 约束关键字各占一列 —— 关键字按「槽位」定位（not null、default x、
+//   comment '…'、auto_increment…），某行没写某个关键字就留空位，这样 comment 永远在同一列。
+//   表选项：distribute by / partition by / comment = 的首词补齐，让 by 与 = 对齐
+// 解析不出固定形态的行（表级约束、注释、跨行定义）原样保留，不猜测。
+// ---------------------------------------------------------------------------
+const COL_KEYWORD_HEADS = [
+	['not', 'null'], ['not'], ['null'], ['default'], ['comment'], ['auto_increment'],
+	['on', 'update'], ['character', 'set'], ['collate'], ['references'], ['generated'],
+	['primary', 'key'], ['unique'], ['key'], ['check'],
+];
+// 槽位顺序：决定关键字列的先后；'null' 与 'not null' 共用一列
+const COL_SLOT_ORDER = [
+	'not', 'default', 'auto_increment', 'on', 'collate', 'character',
+	'references', 'generated', 'comment', 'primary', 'unique', 'key', 'check',
+];
+const COL_SLOT_OF = { null: 'not' };
+const TABLE_CONSTRAINT_RE = /^(primary\s+key|unique|key|index|constraint|foreign\s+key|fulltext)\b/i;
+
+// 引号与括号内的空白不切分：decimal(18, 4) 视为一个类型 token，'订单 id' 视为一个值 token
+function splitTokens(text) {
+	const tokens = [];
+	let cur = '';
+	let quote = null;
+	let depth = 0;
+	for (let i = 0; i < text.length; i++) {
+		const c = text[i];
+		if (quote) {
+			cur += c;
+			if (c === quote && text[i - 1] !== '\\') quote = null;
+			continue;
+		}
+		if (c === "'" || c === '"' || c === '`') {
+			quote = c;
+			cur += c;
+			continue;
+		}
+		if (c === '(') depth++;
+		else if (c === ')') depth = Math.max(0, depth - 1);
+		else if (depth === 0 && /\s/.test(c)) {
+			if (cur) tokens.push(cur);
+			cur = '';
+			continue;
+		}
+		cur += c;
+	}
+	if (cur) tokens.push(cur);
+	return tokens;
+}
+
+function headLenAt(tokens, i) {
+	let best = 0;
+	COL_KEYWORD_HEADS.forEach((head) => {
+		if (head.length <= best) return;
+		if (head.every((w, k) => String(tokens[i + k] || '').toLowerCase() === w)) best = head.length;
+	});
+	return best;
+}
+
+// 拆成 { name, type, slots }；形态不认识返回 null（该行不参与对齐，也不会因此改动）
+function columnCells(text) {
+	const t = text.trim();
+	if (/^(-{2}|\/\*)/.test(t) || TABLE_CONSTRAINT_RE.test(t)) return null;
+	const tokens = splitTokens(t);
+	// 名称 + 类型两段就够参与对齐（没有约束关键字的列照样要跟同表其它列对齐）
+	if (tokens.length < 2) return null;
+	const slots = {};
+	let i = 2;
+	while (i < tokens.length) {
+		const head = headLenAt(tokens, i);
+		if (!head) return null;
+		let j = i + head;
+		while (j < tokens.length && !headLenAt(tokens, j)) j++;
+		const raw = tokens[i].toLowerCase();
+		const slot = COL_SLOT_OF[raw] || raw;
+		// 同一关键字出现两次（形态超出预期）就不对齐，避免猜错位置
+		if (slots[slot] !== undefined || !COL_SLOT_ORDER.includes(slot)) return null;
+		slots[slot] = tokens.slice(i, j).join(' ');
+		i = j;
+	}
+	return { name: tokens[0], type: tokens[1], slots };
+}
+
+// 中日韩字符按 2 列宽计算，否则中文列名/注释会对不齐
+function dispWidth(text) {
+	let w = 0;
+	for (const ch of text) {
+		const c = ch.codePointAt(0);
+		const wide =
+			(c >= 0x1100 && c <= 0x115f) ||
+			(c >= 0x2e80 && c <= 0xa4cf && c !== 0x303f) ||
+			(c >= 0xac00 && c <= 0xd7a3) ||
+			(c >= 0xf900 && c <= 0xfaff) ||
+			(c >= 0xfe30 && c <= 0xfe6f) ||
+			(c >= 0xff00 && c <= 0xff60) ||
+			(c >= 0xffe0 && c <= 0xffe6);
+		w += wide ? 2 : 1;
+	}
+	return w;
+}
+
+function alignColumnKeywords(cols) {
+	const parsed = cols.map((c) => columnCells(c.text));
+	if (parsed.filter(Boolean).length < 2) return null;
+	const at = (slot) => COL_SLOT_ORDER.indexOf(slot) + 2;
+	const widths = [0, 0]; // 0=名称 1=类型
+	parsed.forEach((p) => {
+		if (!p) return;
+		widths[0] = Math.max(widths[0], dispWidth(p.name));
+		widths[1] = Math.max(widths[1], dispWidth(p.type));
+		Object.entries(p.slots).forEach(([slot, text]) => {
+			const idx = at(slot);
+			widths[idx] = Math.max(widths[idx] || 0, dispWidth(text));
+		});
+	});
+	// 表里实际用到的关键字列（顺序即槽位顺序），后续按整列补位
+	const slotsUsed = COL_SLOT_ORDER.filter((slot) => widths[at(slot)] !== undefined).map((slot) => ({
+		slot,
+		width: widths[at(slot)] || 0,
+	}));
+	return cols.map((c, idx) => {
+		const p = parsed[idx];
+		if (!p) return c.text;
+		const row = [p.name, p.type, ...slotsUsed.map((s) => p.slots[s.slot] || '')];
+		const rowWidths = [widths[0], widths[1], ...slotsUsed.map((s) => s.width)];
+		// 行末的关键字列不必补空格（右边没有要对齐的东西）
+		let last = row.length - 1;
+		while (last > 1 && !row[last]) last--;
+		return row
+			.slice(0, last + 1)
+			.map((text, i) =>
+				text + (i === last ? '' : ' '.repeat(Math.max(0, rowWidths[i] - dispWidth(text))))
+			)
+			.join(' ');
+	});
+}
+
+// 表选项：首词补齐到等宽，distribute by / partition by 的 by 与 comment = 的 = 对齐
+function alignOptionHeads(options) {
+	const heads = options
+		.filter((o) => !o.isComment)
+		.map((o) => (o.text.match(/^([A-Za-z_][A-Za-z0-9_]*)\b/) || [])[1])
+		.filter(Boolean);
+	if (heads.length < 2) return null;
+	const max = Math.max(...heads.map((h) => h.length));
+	return options.map((o) => {
+		if (o.isComment) return o.text;
+		const m = o.text.match(/^([A-Za-z_][A-Za-z0-9_]*)(\s+)([\s\S]*)$/);
+		if (!m) return o.text;
+		return m[1] + ' '.repeat(max - m[1].length + 1) + m[3];
+	});
 }
 
 // ---------------------------------------------------------------------------
@@ -563,15 +821,23 @@ function reformatDdl(text) {
 			continue;
 		}
 		const body = [];
-		const opts = rebuilt.options;
+		const rawOpts = rebuilt.options;
 		// 分号只能落在最后一条非注释选项上，否则会掉进行注释里
 		let lastCodeIdx = -1;
-		opts.forEach((o, idx) => {
+		rawOpts.forEach((o, idx) => {
 			if (!o.isComment) lastCodeIdx = idx;
 		});
+		// 关键字纵向对齐：只在解析得出固定形态时启用，否则保持原样
+		const alignedCols = alignColumnKeywords(rebuilt.cols);
+		const alignedHeads = alignOptionHeads(rawOpts);
+		const opts = rawOpts.map((o, idx) => ({ ...o, text: alignedHeads ? alignedHeads[idx] : o.text }));
 		body.push(indent + rebuilt.header);
 		body.push(indent + '(');
-		rebuilt.cols.forEach((c) => body.push(indent + '\t' + (c.comma ? ', ' : '') + c.text));
+		rebuilt.cols.forEach((c, idx) => {
+			// 对齐后首条列没有 `, ` 前缀，补 2 空格才能与逗号行的列名对齐
+			const lead = c.comma ? ', ' : alignedCols ? '  ' : '';
+			body.push(indent + '	' + lead + (alignedCols ? alignedCols[idx] : c.text));
+		});
 		if (opts.length) {
 			body.push(indent + ')');
 			opts.forEach((o, idx) =>
@@ -601,7 +867,8 @@ function formatSql(text, cfg, tabWidth) {
 	});
 	const tabbed = toTabs(formatted, tabWidth);
 	const merged = joinShortLists(tabbed, cfg.expressionWidth);
-	return reformatDdl(merged);
+	const windowed = inlineWindowSpecs(merged, cfg.expressionWidth);
+	return reformatDdl(windowed);
 }
 
 module.exports = {
@@ -621,6 +888,11 @@ module.exports = {
 		splitOptionLines,
 		formatCreateTable,
 		reformatDdl,
+		inlineWindowSpecs,
+		flattenSpec,
+		alignColumnKeywords,
+		alignOptionHeads,
+		columnCells,
 		maskLiterals,
 	},
 };

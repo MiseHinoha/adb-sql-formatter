@@ -1,5 +1,16 @@
 {
 	"Missing semicolon after the previous statement: a multi-statement file without it is parsed as a single statement by the platform and fails with a syntax error. Click the lightbulb on the squiggle to insert one.": "上一条语句末尾缺少分号：多语句文件在平台上会被当成一条语句解析，直接语法错。用鼠标点波浪线处的灯泡图标即可补上。",
 	"Insert semicolon": "插入分号",
-	"Insert semicolon and a blank line": "插入分号并空一行"
+	"Insert semicolon and a blank line": "插入分号并空一行",
+	"Fix the setting": "修正该设置",
+	"Do not show again": "不再提示",
+	"The extension in editor.defaultFormatter is not installed ({0}), so VS Code will not format on save. Switch to ADB SQL Formatter?": "editor.defaultFormatter 指向的扩展没装（{0}），VS Code 因此不会在保存时格式化。改用 ADB SQL Formatter？",
+	"Format sql / mysql files on save? This extension leaves your files alone until you turn it on.": "要在保存时格式化 sql / mysql 文件吗？在打开这个开关之前，本扩展不会动你的文件。",
+	"Enable on save": "开启保存即格式化",
+	"No thanks": "不用了",
+	"Turned editor.formatOnSave off for {0} too, so saving really only saves. (The editor's own switch is a separate path this extension's switch cannot reach at runtime.)": "顺手把编辑器自己的 editor.formatOnSave 对 {0} 也关掉了，这样保存就真的只保存。（编辑器那个开关是另一条路，运行时拦不住。）",
+	"Undo": "撤销",
+	"editor.formatOnSave is still on for {0}: VS Code calls this extension's formatter on save, so files are still reformatted even though adbSqlFormatter.formatOnSave is off. Turn the editor setting off as well?": "editor.formatOnSave 对 {0} 还开着：VS Code 会在保存时调用本扩展的排版器，所以即使本扩展的『保存时自动格式化』关着，文件照样被重排。要不要把它也关掉？",
+	"Turn it off there too": "也关掉",
+	"Keep it": "保持现状"
 }

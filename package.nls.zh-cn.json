@@ -4,5 +4,9 @@
 	"adbSqlFormatter.logicalOperatorNewline": "and / or 换行位置",
 	"adbSqlFormatter.linesBetweenQueries": "多条 SQL 之间的空行数",
 	"adbSqlFormatter.requireSemicolonBetweenStatements": "文件里存在 2 条及以上语句时，检查上一条语句末尾是否用分号截断（只有 1 条语句的文件不检查）。格式化器永不自动补分号。",
-	"adbSqlFormatter.missingSemicolonSeverity": "缺分号提示的级别：黄色波浪线（warning）或红色（error）"
+	"adbSqlFormatter.missingSemicolonSeverity": "缺分号提示的级别：黄色波浪线（warning）或红色（error）",
+	"adbSqlFormatter.formatOnSave": "保存时自动格式化 sql / mysql 文件 —— 唯一的开关。关着时保存绝不重排（本扩展还会把编辑器自己的 editor.formatOnSave 也对 sql / mysql 关掉 —— 那是另一条路，运行时拦不住）。手动排版完全不受影响：Shift+Alt+F、右键菜单、命令面板。",
+	"adbSqlFormatter.takeOverSaveKey": "在 sql / mysql 编辑器里接管 Ctrl+S / Cmd+S：先格式化再保存。若这个键该归你的键位方案，关掉它即可（改用命令「格式化并保存」或自己绑一个键）。",
+	"adbSqlFormatter.command.formatAndSave": "格式化并保存",
+	"adbSqlFormatter.command.formatDocument": "格式化文档（ADB SQL Formatter）"
 }

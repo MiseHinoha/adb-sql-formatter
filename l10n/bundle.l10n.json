@@ -1,5 +1,16 @@
 {
 	"Missing semicolon after the previous statement: a multi-statement file without it is parsed as a single statement by the platform and fails with a syntax error. Click the lightbulb on the squiggle to insert one.": "Missing semicolon after the previous statement: a multi-statement file without it is parsed as a single statement by the platform and fails with a syntax error. Click the lightbulb on the squiggle to insert one.",
 	"Insert semicolon": "Insert semicolon",
-	"Insert semicolon and a blank line": "Insert semicolon and a blank line"
+	"Insert semicolon and a blank line": "Insert semicolon and a blank line",
+	"Fix the setting": "Fix the setting",
+	"Do not show again": "Do not show again",
+	"The extension in editor.defaultFormatter is not installed ({0}), so VS Code will not format on save. Switch to ADB SQL Formatter?": "The extension in editor.defaultFormatter is not installed ({0}), so VS Code will not format on save. Switch to ADB SQL Formatter?",
+	"Format sql / mysql files on save? This extension leaves your files alone until you turn it on.": "Format sql / mysql files on save? This extension leaves your files alone until you turn it on.",
+	"Enable on save": "Enable on save",
+	"No thanks": "No thanks",
+	"Turned editor.formatOnSave off for {0} too, so saving really only saves. (The editor's own switch is a separate path this extension's switch cannot reach at runtime.)": "Turned editor.formatOnSave off for {0} too, so saving really only saves. (The editor's own switch is a separate path this extension's switch cannot reach at runtime.)",
+	"Undo": "Undo",
+	"editor.formatOnSave is still on for {0}: VS Code calls this extension's formatter on save, so files are still reformatted even though adbSqlFormatter.formatOnSave is off. Turn the editor setting off as well?": "editor.formatOnSave is still on for {0}: VS Code calls this extension's formatter on save, so files are still reformatted even though adbSqlFormatter.formatOnSave is off. Turn the editor setting off as well?",
+	"Turn it off there too": "Turn it off there too",
+	"Keep it": "Keep it"
 }

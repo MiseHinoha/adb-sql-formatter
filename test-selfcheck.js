@@ -98,6 +98,15 @@ files.forEach((f) => {
 				lines.some((l) => /^comment\b/i.test(l.trim()) && !/^(distribute|distributed|partition)\b/i.test(l.trim()))
 			);
 			check(`${tag} 关键字已小写`, !/(^|\s)(SELECT|FROM|WHERE|DISTRIBUTE|PRIMARY KEY)(\s|$)/.test(once));
+			// 关键字纵向对齐：含 comment 的列定义行，comment 必须落在同一列
+			const comCols = lines
+				.filter((l) => /^\s*,?\s*\w+\s+\w+/.test(l) && /\bcomment\s/i.test(l))
+				.map((l) => l.indexOf('comment'));
+			check(
+				`${tag} 列定义 comment 对齐`,
+				comCols.length < 2 || new Set(comCols).size === 1,
+				comCols.join(',')
+			);
 		}
 	});
 });
@@ -124,6 +133,64 @@ check(
 	/NVL\(a, 0\)/.test(formatSql('select nvl(a, 0) from t', UPPER, 4)),
 	'进了函数表就等于吃 keywordCase，与 SUM/COUNT 同口径'
 );
+
+// 1.5.0 排版回归：逗号行缩进（任意 tabWidth）/ 窗口子句不换行 / 建表关键字纵向对齐
+console.log('');
+[2, 3, 4, 8].forEach((w) => {
+	const out = formatSql('select a, b, c from t', cfg, w);
+	check(
+		`tabWidth=${w}：逗号行与首个字段同级缩进`,
+		/^select\n	a\n	, b\n	, c\n	from t$/m.test(out),
+		JSON.stringify(out)
+	);
+});
+
+const windowShort = formatSql(
+	'select row_number() over (partition by user_id order by dt desc) as rn, count(1) over() as c from t',
+	cfg,
+	4
+);
+check(
+	'窗口子句保持一行 over (partition by … order by …)',
+	/row_number\(\) over \(partition by user_id order by dt desc\) as rn/.test(windowShort),
+	JSON.stringify(windowShort)
+);
+const windowLongSql =
+	'select row_number() over (partition by user_id, shop_id, city_code, province_code order by dt desc, amount desc, order_id asc, uid desc) as rn from t';
+const windowLong = formatSql(windowLongSql, cfg, 4);
+check(
+	'窗口子句超过 expressionWidth 时仍换行',
+	/\n		partition by user_id\n/.test(windowLong),
+	JSON.stringify(windowLong)
+);
+check('窗口子句合并不改变代码骨架', skeleton(windowLong) === skeleton(formatSql(windowLong, cfg, 4)));
+
+const ddlSrc = `create table demo_align (order_id bigint not null comment '订单id', uid bigint not null comment '下单用户', amount decimal(18, 4) not null comment '付费金额', primary key (order_id)) distribute by hash(uid) partition by value(order_id) comment = 'DWD-订单';`;
+const alignOut = formatSql(ddlSrc, cfg, 4);
+const alignLines = alignOut.split('\n');
+const at = (i, word) => alignLines[i].indexOf(word);
+check(
+	'列名纵向对齐（首行补 2 空格抵消前置逗号）',
+	at(2, 'order_id') === at(3, 'uid') && at(3, 'uid') === at(4, 'amount'),
+	[at(2, 'order_id'), at(3, 'uid'), at(4, 'amount')].join(',')
+);
+check(
+	'类型纵向对齐',
+	at(2, 'bigint') === at(3, 'bigint') && at(3, 'bigint') === at(4, 'decimal(18, 4)'),
+	[at(2, 'bigint'), at(3, 'bigint'), at(4, 'decimal(18, 4)')].join(',')
+);
+check(
+	'comment 关键字纵向对齐',
+	at(2, 'comment') === at(3, 'comment') && at(3, 'comment') === at(4, 'comment'),
+	[at(2, 'comment'), at(3, 'comment'), at(4, 'comment')].join(',')
+);
+check(
+	'表选项 by / = 纵向对齐',
+	/^distribute by /m.test(alignOut) && /^partition  by /m.test(alignOut) && /^comment    = /m.test(alignOut),
+	JSON.stringify(alignLines.slice(7).join(' | '))
+);
+check('建表对齐幂等', formatSql(alignOut, cfg, 4) === alignOut);
+check('建表对齐不改变代码骨架', skeleton(alignOut) === skeleton(ddlSrc));
 
 // 缺分号检测：fixture 里最后一条没有分号，属「末条不报」，前面几条都带分号
 const ddlText = fs.readFileSync(path.join(fixtureDir, 'ddl.sql'), 'utf8');
