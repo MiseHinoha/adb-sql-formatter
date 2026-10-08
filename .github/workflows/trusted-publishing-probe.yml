@@ -1,0 +1,77 @@
+name: Trusted publishing probe
+
+# 每周探一次 VS Code Marketplace 的 trusted publishing 入口是否已开放。
+# 探测方式：带一个假 token 打 OIDC 交换端点 —— 服务端在验证 token 之前就会因 feature flag
+# 未开放而直接拒，因此这条探测不会发布任何东西、不动任何账号状态。
+# 入口一开放就开一个 issue 通知（只开一次）；仍关闭则什么都不做（每周一条绿色记录）。
+# 与 Fairy 本机那份探测脚本互为备份：fairy-dev/scripts/marketplace-trusted-publishing-probe.sh
+#
+# 注意：仓库连续 60 天没有活动时 GitHub 会暂停 schedule 触发，需要手动 Run workflow 唤醒。
+on:
+  schedule:
+    - cron: '0 1 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  probe:
+    name: Probe trusted publishing
+    runs-on: ubuntu-latest
+    env:
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: 探测交换端点
+        id: probe
+        run: |
+          set -u
+          resp=$(curl -sS --max-time 30 -X POST 'https://marketplace.visualstudio.com/_apis/gallery/token?api-version=7.2-preview.1' -H 'Accept: application/json' -H 'Authorization: Bearer probe-not-a-real-token' -H 'Content-Type: application/json' -H 'User-Agent: vsce' -d '{"publisherName":"YipTszkwan"}' || true)
+          echo "$resp"
+          if [ -z "$resp" ]; then
+            state=unknown
+          elif printf '%s' "$resp" | grep -q 'Trusted Publishing is not supported'; then
+            state=closed
+          else
+            state=open
+          fi
+          echo "state=$state" >> "$GITHUB_OUTPUT"
+          {
+            echo '### trusted publishing 入口探测'
+            echo ''
+            if [ "$state" = "closed" ]; then
+              echo '入口仍未开放：服务端照旧回 Trusted Publishing is not supported。'
+            elif [ "$state" = "open" ]; then
+              echo '入口疑似已开放，下一步见 issue。'
+            else
+              echo '没拿到响应（网络或端点问题），本次不算数。'
+            fi
+            echo ''
+            echo '```'
+            printf '%s' "$resp" | head -c 600
+            echo ''
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 入口已开放则开 issue 通知（只开一次）
+        if: steps.probe.outputs.state == 'open'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          existing=$(gh issue list --state open --search 'trusted publishing 入口 already 全自动 in:title' --json number --jq 'length')
+          if [ "$existing" != "0" ]; then
+            echo "已有 open issue（$existing 条），跳过"
+            exit 0
+          fi
+          {
+            echo 'Marketplace 侧检测到入口已开放，可以把手动上传这一步去掉，全程交给 CI。'
+            echo ''
+            echo '1. publisher 页 → trusted publishing → 填仓库 MiseHinoha/adb-sql-formatter + workflow 文件名 publish.yml（大小写敏感，不写路径）。'
+            echo '2. 仓库 Settings → Secrets and variables → Actions → Variables → 把 MARKETPLACE_TRUSTED_PUBLISHING 设为 true。'
+            echo '3. 之后推 tag 即全自动发布：CI 里那两个互斥 step 会自动切到真发布，不再需要手工上传 vsix。'
+            echo ''
+            echo '验证：gh workflow run publish.yml -f verify_only=false，或直接推下一个版本的 tag。'
+            echo '做完关闭本 issue 即可。'
+          } > /tmp/trusted-publishing-issue.md
+          gh issue create --title 'Marketplace trusted publishing 入口已开放：可以切全自动发布了' --body-file /tmp/trusted-publishing-issue.md
