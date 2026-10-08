@@ -19,6 +19,10 @@ test/**
 .trash/**
 dist/**
 vibe_images/**
+# 本地草稿与打包物不随扩展分发：它们只在工作树里（被 .gitignore / .git/info/exclude 挡在 git 外），
+# CI 的干净 checkout 里本就没有 —— 补上这两条，本地产物与 CI 产物才一致。
+IDEA.md
+*.zip
 images/**/*.md
 images/icon-128.png
 package-lock.json
