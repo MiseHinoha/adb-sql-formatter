@@ -406,6 +406,31 @@ async function runSaveTests() {
 	const lfDoc = new FakeDocument('select a,b from t\nwhere a = 1\n');
 	edits = await saveEdits(lfDoc);
 	check('LF 文档不会被改成 CRLF', !!edits && !/\r/.test(edits[0].newText));
+	// CRLF + /**/ 块注释（1.5.1 修的 bug）：核心输出里残留的 CR 会被拼成 CRCRLF，
+	// 编辑器把孤立的 CR 也当换行 → 注释每行后面多一个空行，且每次保存多一层
+	const crlfComment = '/*\r\n活动流水\r\n送礼人数\r\n*/\r\nselect a,b from t\r\n';
+	let cmtDoc = new FakeDocument(crlfComment);
+	edits = await saveEdits(cmtDoc);
+	check(
+		'CRLF 块注释：回写里没有 CRCR',
+		!!edits && !/\r\r/.test(edits[0].newText),
+		edits ? JSON.stringify(edits[0].newText) : '无 edits'
+	);
+	check(
+		'CRLF 块注释：注释行数不变（不多空行）',
+		!!edits && edits[0].newText.split('\r\n').slice(0, 5).join('|') === '/*|活动流水|送礼人数|*/|select',
+		edits ? JSON.stringify(edits[0].newText.split('\r\n').slice(0, 5)) : '无 edits'
+	);
+	if (edits) {
+		const first = edits[0].newText;
+		cmtDoc = new FakeDocument(first);
+		const again = await saveEdits(cmtDoc);
+		check(
+			'CRLF 块注释：紧接着再保存一次不再增长',
+			!!again && again[0].newText === first,
+			again ? JSON.stringify(again[0].newText) : '无 edits'
+		);
+	}
 
 	// ---- Ctrl+S 命令：文件没改动时也要格式化并保存 ----
 	const fakeEditor = (doc) => ({

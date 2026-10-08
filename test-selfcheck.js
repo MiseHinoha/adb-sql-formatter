@@ -3,7 +3,7 @@
 // 运行：node test-selfcheck.js
 const fs = require('fs');
 const path = require('path');
-const { formatSql, findStatements, EXTRA_FUNCTION_NAMES: EXTRA_FN } = require('./formatter-core');
+const { formatSql, findStatements, toEol, EXTRA_FUNCTION_NAMES: EXTRA_FN } = require('./formatter-core');
 
 const cfg = {
 	keywordCase: 'lower',
@@ -191,6 +191,25 @@ check(
 );
 check('建表对齐幂等', formatSql(alignOut, cfg, 4) === alignOut);
 check('建表对齐不改变代码骨架', skeleton(alignOut) === skeleton(ddlSrc));
+// 1.5.1 排版回归：换行符归一 —— CRLF 文档里的 /**/ 块注释不再被撑出空行
+console.log('');
+const crlfSrc =
+	'/*\r\n活动流水\r\n送礼人数\r\n奖池投入\r\n*/\r\nselect a, b\r\nfrom t\r\nwhere a = 1;\r\n';
+const lfSrc = crlfSrc.replace(/\r\n/g, '\n');
+const crlfOut = formatSql(crlfSrc, cfg, 4);
+check('换行符归一：CRLF 与 LF 输入产出同一结果', crlfOut === formatSql(lfSrc, cfg, 4));
+check('换行符归一：核心输出不含 CR', !/\r/.test(crlfOut), JSON.stringify(crlfOut));
+// 扩展按文档换行符回写 = 一次「保存即格式化」；连做三次，注释行数与内容都必须稳定
+let saved = crlfSrc;
+for (let i = 0; i < 3; i++) saved = toEol(formatSql(saved, cfg, 4), '\r\n');
+check('CRLF 块注释：连存三次不出现 CRCR（编辑器会把它显示成空行）', !/\r\r/.test(saved));
+check(
+	'CRLF 块注释：正文既不被补空行、也不重排',
+	saved.split('\r\n').slice(0, 6).join('|') === '/*|活动流水|送礼人数|奖池投入|*/|select',
+	JSON.stringify(saved.split('\r\n').slice(0, 6))
+);
+check('CRLF 块注释：再次保存结果不变（幂等，空行不会越滚越多）', toEol(formatSql(saved, cfg, 4), '\r\n') === saved);
+check('LF 文档不会被改成 CRLF', !/\r/.test(toEol(formatSql(lfSrc, cfg, 4), '\n')));
 
 // 缺分号检测：fixture 里最后一条没有分号，属「末条不报」，前面几条都带分号
 const ddlText = fs.readFileSync(path.join(fixtureDir, 'ddl.sql'), 'utf8');

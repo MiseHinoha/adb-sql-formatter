@@ -1,5 +1,5 @@
 const vscode = require('vscode');
-const { formatSql, findStatements } = require('./formatter-core');
+const { formatSql, findStatements, toEol } = require('./formatter-core');
 
 const EXT_ID = 'YipTszkwan.adb-sql-formatter';
 const DIAG_SOURCE = 'ADB SQL Formatter';
@@ -193,7 +193,8 @@ function makeEdits(document, range, options) {
 		if (isRange && base) {
 			result = result.split('\n').map((l) => (l ? base + l : l)).join('\n');
 		}
-		if (eolOf(document) === '\r\n') result = result.replace(/\n/g, '\r\n');
+		// 按文档换行符回写。toEol 会先归一到 LF 再拼：核心输出里若残留 CR（块注释正文，见 formatter-core 的换行符归一），直接做 LF→CRLF 会拼成 CRCRLF，编辑器把孤立的 CR 也当换行 —— 注释每行后面就凭空多一个空行。
+		result = toEol(result, eolOf(document));
 		return [vscode.TextEdit.replace(range || fullRange(document), result)];
 	} catch (e) {
 		// 半截 SQL / 解析失败时不改文档，错误写入输出面板便于排查

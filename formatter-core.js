@@ -853,8 +853,27 @@ function reformatDdl(text) {
 	return out.join('\n');
 }
 
+// ---------------------------------------------------------------------------
+// 换行符归一：核心只认 \n
+// sql-formatter 会把块注释内容原样带出 —— CRLF 文档里注释正文的 \r 就这样活到输出里，
+// 而后面每一环（toTabs / joinShortLists / reformatDdl）都按 \n 切分再 join，
+// 于是输出成了「SQL 行只有 \n、注释行还带 \r」的混合换行。
+// 扩展按文档换行符回写时做 \n → \r\n，这些注释行就变成 \r\r\n；
+// 编辑器把孤立的 \r 也当换行，表面现象就是「块注释每行后面凭空多一个空行」，
+// 而且每保存一次多一层 —— 空行越滚越多。故入口与出口各归一次，核心对外只产出 \n。
+// ---------------------------------------------------------------------------
+function normalizeEol(text) {
+	return text.replace(/\r\n?/g, '\n');
+}
+
+// 按文档换行符回写：先归一到 \n 再拼，避免把残留的 \r 拼成 \r\r\n
+function toEol(text, eol) {
+	const lf = normalizeEol(text);
+	return eol === '\r\n' ? lf.replace(/\n/g, '\r\n') : lf;
+}
+
 function formatSql(text, cfg, tabWidth) {
-	const formatted = formatDialect(text, {
+	const formatted = formatDialect(normalizeEol(text), {
 		dialect: buildDialect(),
 		keywordCase: cfg.keywordCase,
 		commaPosition: 'before',
@@ -868,12 +887,15 @@ function formatSql(text, cfg, tabWidth) {
 	const tabbed = toTabs(formatted, tabWidth);
 	const merged = joinShortLists(tabbed, cfg.expressionWidth);
 	const windowed = inlineWindowSpecs(merged, cfg.expressionWidth);
-	return reformatDdl(windowed);
+	return normalizeEol(reformatDdl(windowed));
 }
 
 module.exports = {
 	formatSql,
 	findStatements,
+	// 换行符工具：extension.js 回写用 toEol，测试用 normalizeEol（核心对外只产出 LF）
+	normalizeEol,
+	toEol,
 	// 补进方言函数表的 ADB/DataWorks 函数名；测试据此断言「紧贴括号」行为，避免名单两处维护
 	EXTRA_FUNCTION_NAMES,
 	// 供测试脚本逐步排查内部环节
@@ -894,5 +916,7 @@ module.exports = {
 		alignOptionHeads,
 		columnCells,
 		maskLiterals,
+		normalizeEol,
+		toEol,
 	},
 };
