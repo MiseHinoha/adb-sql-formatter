@@ -1,9 +1,11 @@
 const vscode = require('vscode');
-const { formatSql, findStatements, toEol } = require('./formatter-core');
+const { formatSql, findStatements, toEol, describeFormatError } = require('./formatter-core');
 
 const EXT_ID = 'YipTszkwan.adb-sql-formatter';
 const DIAG_SOURCE = 'ADB SQL Formatter';
 const DIAG_CODE = 'missing-semicolon';
+// 排版失败（语法错）的诊断码：与「缺分号」区分开，quick fix 不会认错
+const FORMAT_ERROR_CODE = 'format-error';
 const LANGUAGES = ['sql', 'mysql'];
 // 「editor.defaultFormatter 指向没装的扩展」提示过就不再提（globalState 里的键）
 const FORMATTER_WARNED = 'defaultFormatterWarningShown';
@@ -33,6 +35,7 @@ function getConfig() {
 		severity: c.get('missingSemicolonSeverity', 'warning'),
 		formatOnSave: c.get('formatOnSave', false),
 		takeOverSaveKey: c.get('takeOverSaveKey', true),
+		reportFormatError: c.get('notifyOnFormatError', true),
 	};
 }
 
@@ -175,6 +178,52 @@ function eolOf(document) {
 	return /\r\n/.test(document.getText()) ? '\r\n' : '\n';
 }
 
+// ---------------------------------------------------------------------------
+// 排版失败时的反馈（语法错 / 解析器抛错）
+// 以前这里只 console.error 然后返回 undefined —— 用户按 Ctrl+S 看到的就是「没反应」：
+// 文件照原样存下去了，也没有任何提示。现在给两样东西：
+//   ① 波浪线诊断（定位到出错的物理行），修好并成功排版后自动消失；
+//   ② 一条警告提示，同一条错误只弹一次（修好前反复保存不刷屏）。
+// 弹窗与波浪线都受 adbSqlFormatter.notifyOnFormatError 控制，关掉即完全静默。
+// ---------------------------------------------------------------------------
+let formatErrorDiagnostics = null;
+const lastFormatError = new Map();
+
+function clearFormatError(document) {
+	lastFormatError.delete(document.uri.toString());
+	if (formatErrorDiagnostics) formatErrorDiagnostics.delete(document.uri);
+}
+
+function reportFormatError(document, err) {
+	// 这里跑在保存链路上：提示本身出错也绝不能把「保存」带下水
+	try {
+		if (!getConfig().reportFormatError) return;
+		const info = describeFormatError(err);
+		const where = info.line
+			? ' (' + t('line {0} column {1}').replace('{0}', info.line).replace('{1}', info.column || 1) + ')'
+			: '';
+		const message = t('Format failed: {0}').replace('{0}', info.message) + where;
+		if (formatErrorDiagnostics) {
+			const lines = document.getText().split('\n').map((l) => l.replace(/\r$/, ''));
+			const idx = info.line ? Math.min(Math.max(info.line - 1, 0), lines.length - 1) : 0;
+			const d = new vscode.Diagnostic(
+				new vscode.Range(new vscode.Position(idx, 0), new vscode.Position(idx, lines[idx].length)),
+				message,
+				vscode.DiagnosticSeverity.Warning
+			);
+			d.source = DIAG_SOURCE;
+			d.code = FORMAT_ERROR_CODE;
+			formatErrorDiagnostics.set(document.uri, [d]);
+		}
+		const key = document.uri.toString();
+		if (lastFormatError.get(key) === message) return;
+		lastFormatError.set(key, message);
+		vscode.window.showWarningMessage(t('{0} The file was saved as is, nothing was reformatted.').replace('{0}', message));
+	} catch (e) {
+		console.error('[adb-sql-formatter]', e);
+	}
+}
+
 function makeEdits(document, range, options) {
 	try {
 		const cfg = getConfig();
@@ -195,10 +244,13 @@ function makeEdits(document, range, options) {
 		}
 		// 按文档换行符回写。toEol 会先归一到 LF 再拼：核心输出里若残留 CR（块注释正文，见 formatter-core 的换行符归一），直接做 LF→CRLF 会拼成 CRCRLF，编辑器把孤立的 CR 也当换行 —— 注释每行后面就凭空多一个空行。
 		result = toEol(result, eolOf(document));
+		// 这一次排版成功 → 之前的失败诊断作废
+		clearFormatError(document);
 		return [vscode.TextEdit.replace(range || fullRange(document), result)];
 	} catch (e) {
-		// 半截 SQL / 解析失败时不改文档，错误写入输出面板便于排查
+		// 半截 SQL / 解析失败时不改文档，但要给用户看得见的反馈（否则就是「按了保存没反应」）
 		console.error('[adb-sql-formatter]', e);
+		reportFormatError(document, e);
 		return undefined;
 	}
 }
@@ -440,6 +492,10 @@ class SemicolonCodeActionProvider {
 function activate(context) {
 	const collection = vscode.languages.createDiagnosticCollection('adbSqlFormatter');
 	context.subscriptions.push(collection);
+	// 排版失败单独一个集合：缺分号的 validateDocument 每次改动都会 set 自己那份，
+	// 混在一个集合里排版错误会被它顺手抹掉
+	formatErrorDiagnostics = vscode.languages.createDiagnosticCollection('adbSqlFormatterFormat');
+	context.subscriptions.push(formatErrorDiagnostics);
 
 	// 先让 Ctrl/Cmd+S 那条绑定的开关就位，避免激活瞬间按键落到别处
 	syncSaveKeyContext();
@@ -458,7 +514,10 @@ function activate(context) {
 		vscode.workspace.onDidOpenTextDocument((d) => validateDocument(d, collection)),
 		vscode.workspace.onDidChangeTextDocument((e) => validateDocument(e.document, collection)),
 		vscode.workspace.onDidSaveTextDocument((d) => validateDocument(d, collection)),
-		vscode.workspace.onDidCloseTextDocument((d) => collection.delete(d.uri)),
+		vscode.workspace.onDidCloseTextDocument((d) => {
+			collection.delete(d.uri);
+			clearFormatError(d);
+		}),
 		// Ctrl+S 先格式化再落盘（不依赖编辑器设置的开关，见 formatOnWillSave）
 		vscode.workspace.onWillSaveTextDocument((e) => formatOnWillSave(e)),
 		// Ctrl+S 自己接住：先格式化再保存（含「文件没改动」这种不跑保存参与者的场景）
@@ -468,6 +527,8 @@ function activate(context) {
 			vscode.workspace.textDocuments.forEach((d) => validateDocument(d, collection));
 			syncSaveKeyContext();
 			// 本扩展开关刚被关掉 → 把编辑器自带的 formatOnSave 也对齐关掉（否则保存仍会被重排）
+			// 关掉失败提示时把已经画出来的波浪线一起收走，别留下没人管的红线
+			if (!getConfig().reportFormatError && formatErrorDiagnostics) formatErrorDiagnostics.clear();
 			if (!getConfig().formatOnSave) {
 				Promise.resolve(alignEditorFormatOnSave({ notify: true })).catch((e) =>
 					console.error('[adb-sql-formatter]', e)

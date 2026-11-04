@@ -854,6 +854,49 @@ function reformatDdl(text) {
 }
 
 // ---------------------------------------------------------------------------
+// `--` 行注释收在字段末尾时，sql-formatter 会先把注释换行收尾、再给前置逗号换行，
+// 于是字段行与下一个逗号行之间凭空多一个空行 —— 每个带行尾注释的字段多占一行（行数翻倍）。
+// 这里只吃掉这种空行：中间那行是空行、上一行带行内注释、下一行以逗号开头。
+// 空行只可能来自排版器（sql-formatter 不保留用户写的空行），所以不做其它猜测。
+// ---------------------------------------------------------------------------
+function hasTrailingLineComment(line) {
+	let quote = null;
+	for (let i = 0; i < line.length; i++) {
+		const c = line[i];
+		if (quote) {
+			if (c === quote && line[i - 1] !== '\\') quote = null;
+			continue;
+		}
+		if (c === "'" || c === '"' || c === '`') {
+			quote = c;
+			continue;
+		}
+		if (c === '-' && line[i + 1] === '-') return true;
+		if (c === '/' && line[i + 1] === '*') {
+			const end = line.indexOf('*/', i + 2);
+			if (end < 0) return false;
+			i = end + 1;
+		}
+	}
+	return false;
+}
+
+function collapseCommaCommentGaps(text) {
+	const lines = text.split('\n');
+	const out = [];
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i];
+		const gap =
+			!line.trim() &&
+			out.length > 0 &&
+			/^\s*,/.test(lines[i + 1] || '') &&
+			hasTrailingLineComment(out[out.length - 1]);
+		if (!gap) out.push(line);
+	}
+	return out.join('\n');
+}
+
+// ---------------------------------------------------------------------------
 // 换行符归一：核心只认 \n
 // sql-formatter 会把块注释内容原样带出 —— CRLF 文档里注释正文的 \r 就这样活到输出里，
 // 而后面每一环（toTabs / joinShortLists / reformatDdl）都按 \n 切分再 join，
@@ -884,10 +927,29 @@ function formatSql(text, cfg, tabWidth) {
 		logicalOperatorNewline: cfg.logicalOperatorNewline,
 		paramTypes: { custom: [{ regex: PARAM_REGEX }] },
 	});
-	const tabbed = toTabs(formatted, tabWidth);
+	// 行尾注释后面多出来的空行先吃掉（见 collapseCommaCommentGaps），再折算 tab 缩进
+	const tabbed = toTabs(collapseCommaCommentGaps(formatted), tabWidth);
 	const merged = joinShortLists(tabbed, cfg.expressionWidth);
 	const windowed = inlineWindowSpecs(merged, cfg.expressionWidth);
 	return normalizeEol(reformatDdl(windowed));
+}
+
+// ---------------------------------------------------------------------------
+// 排版失败时的报错翻译：sql-formatter v13 抛的是 nearley 解析器原文 ——
+// 第一行有用（`Parse error: Unexpected "'abc" at line 1 column 8`），
+// 后面跟着几百行「我期望看到哪些 token」，直接甩给用户没意义。
+// 这里只取第一行并拆出行列号，供诊断波浪线与提示定位。
+// ---------------------------------------------------------------------------
+function describeFormatError(err) {
+	const raw = err && err.message ? String(err.message) : String(err);
+	const firstLine = raw.split('\n')[0].trim();
+	const loc = raw.match(/at line (\d+) column (\d+)/i);
+	const message = firstLine.replace(/\s*at line \d+ column \d+\s*$/i, '').trim() || firstLine;
+	return {
+		message,
+		line: loc ? Number(loc[1]) : null,
+		column: loc ? Number(loc[2]) : null,
+	};
 }
 
 module.exports = {
@@ -896,6 +958,8 @@ module.exports = {
 	// 换行符工具：extension.js 回写用 toEol，测试用 normalizeEol（核心对外只产出 LF）
 	normalizeEol,
 	toEol,
+	// 排版失败时把解析器原文收敛成「一句话 + 行列号」（扩展拿去弹提示、画诊断）
+	describeFormatError,
 	// 补进方言函数表的 ADB/DataWorks 函数名；测试据此断言「紧贴括号」行为，避免名单两处维护
 	EXTRA_FUNCTION_NAMES,
 	// 供测试脚本逐步排查内部环节
@@ -918,5 +982,8 @@ module.exports = {
 		maskLiterals,
 		normalizeEol,
 		toEol,
+		collapseCommaCommentGaps,
+		hasTrailingLineComment,
+		describeFormatError,
 	},
 };

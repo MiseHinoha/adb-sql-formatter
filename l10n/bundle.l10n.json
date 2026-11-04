@@ -12,5 +12,8 @@
 	"Undo": "Undo",
 	"editor.formatOnSave is still on for {0}: VS Code calls this extension's formatter on save, so files are still reformatted even though adbSqlFormatter.formatOnSave is off. Turn the editor setting off as well?": "editor.formatOnSave is still on for {0}: VS Code calls this extension's formatter on save, so files are still reformatted even though adbSqlFormatter.formatOnSave is off. Turn the editor setting off as well?",
 	"Turn it off there too": "Turn it off there too",
-	"Keep it": "Keep it"
+	"Keep it": "Keep it",
+	"Format failed: {0}": "Format failed: {0}",
+	"line {0} column {1}": "line {0} column {1}",
+	"{0} The file was saved as is, nothing was reformatted.": "{0} The file was saved as is, nothing was reformatted."
 }

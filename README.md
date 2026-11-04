@@ -169,6 +169,10 @@ VS Code（键位那条路径照旧自己处理）。
   之后保存走默认值、不再弹。**别把默认值设成 T-SQL 那一类**：它会按 T-SQL 规则重排 ADB 语法，
   `distribute by` / `comment` 这些会被改坏。
 
+- **保存时没反应**：先看有没有波浪线。语法错导致排版失败时，本扩展会在出错行画一条波浪线并弹一条提示
+  （`format-error`），文件按原样保存 —— 不会静默什么都不做，也不会吞掉你的内容。改好再保存，诊断自动消失。
+  不想看这两样提示就关掉 `adbSqlFormatter.notifyOnFormatError`。
+
 ## 设置项
 
 | 配置 | 默认 | 说明 |
@@ -181,6 +185,7 @@ VS Code（键位那条路径照旧自己处理）。
 | `adbSqlFormatter.takeOverSaveKey` | `true` | 在上面那条打开的前提下接管 `Ctrl/Cmd+S`；关掉则只依赖保存钩子（可被别的键位方案影响） |
 | `adbSqlFormatter.requireSemicolonBetweenStatements` | `true` | 多语句文件的缺分号提示开关 |
 | `adbSqlFormatter.missingSemicolonSeverity` | `warning` | 提示级别，可改 `error` 标红 |
+| `adbSqlFormatter.notifyOnFormatError` | `true` | 排版失败（一般是语法错）时，在出错行画波浪线并弹一条带原因的提示；关掉则完全安静（文件照旧按原样保存） |
 
 ## 本地化
 

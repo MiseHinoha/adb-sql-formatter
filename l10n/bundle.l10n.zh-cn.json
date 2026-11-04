@@ -12,5 +12,8 @@
 	"Undo": "撤销",
 	"editor.formatOnSave is still on for {0}: VS Code calls this extension's formatter on save, so files are still reformatted even though adbSqlFormatter.formatOnSave is off. Turn the editor setting off as well?": "editor.formatOnSave 对 {0} 还开着：VS Code 会在保存时调用本扩展的排版器，所以即使本扩展的『保存时自动格式化』关着，文件照样被重排。要不要把它也关掉？",
 	"Turn it off there too": "也关掉",
-	"Keep it": "保持现状"
+	"Keep it": "保持现状",
+	"Format failed: {0}": "格式化失败：{0}",
+	"line {0} column {1}": "第 {0} 行第 {1} 列",
+	"{0} The file was saved as is, nothing was reformatted.": "{0}（文件按原样保存，本次没有重排任何内容）"
 }

@@ -211,6 +211,55 @@ check(
 check('CRLF 块注释：再次保存结果不变（幂等，空行不会越滚越多）', toEol(formatSql(saved, cfg, 4), '\r\n') === saved);
 check('LF 文档不会被改成 CRLF', !/\r/.test(toEol(formatSql(lfSrc, cfg, 4), '\n')));
 
+// 1.5.2 排版回归：字段末尾的 -- 行注释不再把每个字段撑成两行
+console.log('');
+const cmtSrc =
+	'select\n' +
+	'    a.administrator_uid as bd_uid -- BD的uid\n' +
+	'    ,b.no as bd_id -- BD的migo_id\n' +
+	'    ,a.areas -- bd 负责的区域\n' +
+	'from overseas.room_guilid_administrator_authority as a\n' +
+	'where a.is_bd = 1;';
+const cmtOut = formatSql(cmtSrc, cfg, 4);
+const cmtExpect =
+	'select\n' +
+	'\ta.administrator_uid as bd_uid -- BD的uid\n' +
+	'\t, b.no as bd_id -- BD的migo_id\n' +
+	'\t, a.areas -- bd 负责的区域\n' +
+	'\tfrom overseas.room_guilid_administrator_authority as a\n' +
+	'\twhere a.is_bd = 1;';
+check('行尾注释：字段与后续逗号行之间不再多出空行', cmtOut === cmtExpect, JSON.stringify(cmtOut));
+check('行尾注释：注释留在字段同一行、行数不翻倍', cmtOut.split('\n').length === 6, cmtOut.split('\n').length + ' 行');
+check('行尾注释：幂等', formatSql(cmtOut, cfg, 4) === cmtOut);
+check('行尾注释：不改变代码骨架', skeleton(cmtOut) === skeleton(cmtSrc));
+// 字符串字面量里的 -- 不是注释，不能被当成「行尾注释」而误删空行
+const { hasTrailingLineComment } = require('./formatter-core')._internals;
+console.log('');
+check("行尾注释判定：'a--b' 这种字符串里的 -- 不算", hasTrailingLineComment("select 'a--b' as x") === false);
+check('行尾注释判定：真正的行尾注释算', hasTrailingLineComment('select a.x as y -- c') === true);
+check('行尾注释判定：/* */ 块注释不算行注释', hasTrailingLineComment('select a.x /* c */') === false);
+// 语法错：报错只取第一行（解析器后面那几百行 expected token 不进用户视线），并拆出行列号
+const errInfo = (() => {
+	try {
+		formatSql("select 'abc from t;", cfg, 4);
+		return null;
+	} catch (e) {
+		return require('./formatter-core').describeFormatError(e);
+	}
+})();
+console.log('');
+check(
+	'语法错：报错收敛成一行并带行列号',
+	!!errInfo && errInfo.message.length < 120 && errInfo.line === 1 && errInfo.column === 8,
+	JSON.stringify(errInfo)
+);
+check(
+	'语法错：报错正文里不留解析器原文的 expected 列表',
+	!!errInfo && !/I was expecting|token based on|Instead/.test(errInfo.message),
+	JSON.stringify(errInfo && errInfo.message)
+);
+
+
 // 缺分号检测：fixture 里最后一条没有分号，属「末条不报」，前面几条都带分号
 const ddlText = fs.readFileSync(path.join(fixtureDir, 'ddl.sql'), 'utf8');
 const { segments, missing } = findStatements(ddlText);

@@ -68,6 +68,8 @@ const configUpdates = [];
 let warnResponse = undefined;
 let saveCalls = 0;
 const diagnosticsMap = new Map();
+// 排版失败诊断单独一份（真实 API 下是两个集合，混着放会互相覆盖）
+const formatDiagnosticsMap = new Map();
 const settings = {
 	formatOnSave: true, // 用户显式打开（扩展默认是关的）
 	keywordCase: 'lower',
@@ -191,11 +193,15 @@ const vscodeStub = {
 	ConfigurationTarget: { Global: 1, Workspace: 2, WorkspaceFolder: 3 },
 	TextDocumentSaveReason: { Manual: 1, AfterDelay: 2, FocusOut: 3 },
 	languages: {
-		createDiagnosticCollection: () => ({
-			set: (uri, diags) => diagnosticsMap.set(String(uri), diags),
-			delete: (uri) => diagnosticsMap.delete(String(uri)),
-			dispose() {},
-		}),
+		createDiagnosticCollection: (name) => {
+			const m = name === 'adbSqlFormatterFormat' ? formatDiagnosticsMap : diagnosticsMap;
+			return {
+				set: (uri, diags) => m.set(String(uri), diags),
+				delete: (uri) => m.delete(String(uri)),
+				clear: () => m.clear(),
+				dispose() {},
+			};
+		},
 		registerDocumentFormattingEditProvider: (sel, p) => {
 			registered.formattingProvider = p;
 			return { dispose() {} };
@@ -431,6 +437,43 @@ async function runSaveTests() {
 			again ? JSON.stringify(again[0].newText) : '无 edits'
 		);
 	}
+
+	// ---- 1.5.2：排版失败（语法错）必须给提示，不能静默 ----
+	warnCalls.length = 0;
+	const brokenDoc = new FakeDocument("select 'abc from t");
+	const brokenEdits = await saveEdits(brokenDoc);
+	check('语法错时不改文档（保存照常按原样继续）', brokenEdits === null);
+	const brokenDiags = formatDiagnosticsMap.get(String(brokenDoc.uri)) || [];
+	check(
+		'语法错时给出波浪线诊断',
+		brokenDiags.length === 1 && brokenDiags[0].code === 'format-error',
+		JSON.stringify(brokenDiags.map((d) => d.message))
+	);
+	check(
+		'语法错时弹一条带原因的警告',
+		warnCalls.length === 1 && /Format failed/.test(warnCalls[0].message),
+		warnCalls.length ? warnCalls[0].message : '没有提示'
+	);
+	warnCalls.length = 0;
+	await saveEdits(brokenDoc);
+	check('同一条错误反复保存只提示一次', warnCalls.length === 0, '提示 ' + warnCalls.length + ' 次');
+	brokenDoc.applyText('select a, b from t');
+	await saveEdits(brokenDoc);
+	check(
+		'改好并成功排版后失败诊断自动消失',
+		(formatDiagnosticsMap.get(String(brokenDoc.uri)) || []).length === 0,
+		JSON.stringify(formatDiagnosticsMap.get(String(brokenDoc.uri)))
+	);
+	settings.notifyOnFormatError = false;
+	warnCalls.length = 0;
+	await saveEdits(new FakeDocument('select (a from t'));
+	check(
+		'关掉 notifyOnFormatError 后完全静默（不弹窗也不画线）',
+		warnCalls.length === 0 && [...formatDiagnosticsMap.values()].every((d) => d.length === 0),
+		'提示 ' + warnCalls.length + ' 次'
+	);
+	delete settings.notifyOnFormatError;
+
 
 	// ---- Ctrl+S 命令：文件没改动时也要格式化并保存 ----
 	const fakeEditor = (doc) => ({
