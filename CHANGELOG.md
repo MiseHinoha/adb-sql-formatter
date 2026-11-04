@@ -3,7 +3,7 @@
 遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 用户可见的排版规则变化一律算次版本（会重排已有文件），只增提示不改排版的算修订号。
 
-## [1.5.2] - 2026-10-30
+## [1.5.2] - 2026-11-04
 
 ### 修复
 
