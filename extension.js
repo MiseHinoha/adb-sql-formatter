@@ -37,7 +37,7 @@ function getConfig() {
 		takeOverSaveKey: c.get('takeOverSaveKey', true),
 		reportFormatError: c.get('notifyOnFormatError', true),
 		// 结构缩进形态：flat / nested / nested-on（核心 applyStructureIndent 实现）。
-		// 原型阶段默认开成 nested —— 装上就能看到效果；正式发版的默认值待定。
+		// 默认 nested：子句里的 join 与 and/or 续行各深一级；想回到「全部同一列」就设成 flat。
 		indentMode: c.get('indentMode', 'nested'),
 	};
 }

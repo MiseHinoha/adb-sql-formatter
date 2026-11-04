@@ -3,33 +3,22 @@
 遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 用户可见的排版规则变化一律算次版本（会重排已有文件），只增提示不改排版的算修订号。
 
-## [1.6.0] - 未发布（原型，等验收定默认值）
+## [1.6.0] - 2026-11-04
 
-### 新增（可选）
+### 新增
 
-- **结构缩进 `adbSqlFormatter.indentMode`**：三个取值，决定 `from` / `join` / `where` / `and` 这些行的缩进形态。
-  - `flat` —— 现状（子句、join、`and`/`or` 续行全挤在同一列）。
-  - `nested` —— 每个子句行 / join 行开启一个「体」，属于它的续行深一级：join 比 from 深一级、
-    `and` 比 where 深一级、join 的 `on` 续行比该 join 深一级；括号块随开括号那一行整体平移。
-  - `nested-on` —— 在 `nested` 之上，把 `left join t on <cond>` 拆成两行，`on` 条件再深一级
-    （最深、最啰嗦，简单查询会明显变长）。
-  实测（自造语料 15 条 × 2 种模式）：骨架不变（= 只动空白）、二次格式化幂等；
-  对 git 基线 A/B：`flat` 输出与 1.5.2 逐字一致 —— 新阶段不影响旧排版。
-
-### 坑与守卫
-
-- **多行字符串 / 块注释内部的行绝不能补缩进**：补了就是把 tab 打进引号里 = 改数据，
-  `ab` 闸会判「真动代码」。`startsInLiteral` 逐行跟踪引号与块注释状态，这些行原样放行
-  （只在第一版原型里踩过：`a.note in ('第一行\n第二行')` 的第二行被推进一级）。
-- 幂等靠「owner 只在基准缩进相同的行之间认领」：再排一次时 join 已经比 from 深，
-  认领不到 owner，增量归 0，缩进不变。
-
-### 未定
-
-- 默认值（原型期默认 `nested` 方便肉眼验收，正式发版前定）、是否需要 `nested-on`、以及
-  `case when` 内部既有缩进与 join 续行撞在同一列时的观感。
-
-## [1.5.2] - 2026-11-04
+- **结构缩进 `adbSqlFormatter.indentMode`**（默认 `nested`）：决定 `from` / `join` / `where` / `and` 这些行的缩进形态。
+  - `flat` —— 上一版的样子：子句、join、`and`/`or` 续行全挤在同一列。
+  - `nested`（默认）—— 每个子句行 / join 行开启一个「体」，属于它的续行深一级：join 比 from 深一级、
+    `and` 比 where 深一级、join 的 `on` 续行比该 join 深一级；括号块随开括号那一行整体平移，
+    `case when` 的内部保持原样。
+  - `nested-on` —— 在 `nested` 之上，把 `left join t on <cond>` 拆成两行、`on` 条件再深一级
+    （最深、最啰嗦，简单查询会明显变长，按需开启）。
+  **这是排版规则变化**：下次保存会把已有脚本整篇重排（diff 全是空白，代码语义不变），按本仓约定记为次版本；
+  不喜欢就设成 `flat`，观感与上一版完全一致。实测：自造语料 15 条 × 2 种模式骨架不变 + 二次格式化幂等；
+  对 git 基线 A/B：`flat` 输出与上一版逐字一致 —— 新增这一层不影响旧排版。
+- **`adbSqlFormatter.notifyOnFormatError`**（默认开）：排版失败时在出错行画波浪线、并弹一条带原因与行列号的提示；
+  关掉则完全安静（见下面「修复」第二条）。
 
 ### 修复
 
@@ -44,13 +33,24 @@
   同一条错误反复保存只提示一次，改好并成功排版后诊断自动消失。
   新设置 `adbSqlFormatter.notifyOnFormatError`（默认开）可把这两样一起关掉。
 
+### 坑与守卫（结构缩进）
+
+- **多行字符串 / 块注释内部的行绝不能补缩进**：补了就是把 tab 打进引号里 = 改数据，
+  `ab` 闸会判「真动代码」。`startsInLiteral` 逐行跟踪引号与块注释状态，这些行原样放行
+  （原型阶段踩过：`a.note in ('第一行\n第二行')` 的第二行被推进一级）。
+- 幂等靠「owner 只在基准缩进相同的行之间认领」：再排一次时 join 已经比 from 深，认领不到 owner，
+  增量归 0，缩进不变。
+
 ### 开发侧
 
-- `npm test` 新增 1.5.2 回归：行尾注释的 `select` 逐字段一行（精确比对整段输出）、幂等、骨架不变、
-  字符串里的 `--` 不被当注释、`describeFormatError` 只取报错第一行并拆出行列号。
+- 结构缩进：`npm test` 新增三形态对照、幂等、骨架不变、多行字符串守卫、fixture 压测；
+  扩展侧补 `indentMode=flat / nested / nested-on` 接线用例与 manifest 枚举校验。
+- 行尾注释修复：`npm test` 新增「逐字段一行」（精确比对整段输出）、幂等、骨架不变、字符串里的 `--` 不被当注释、
+  `describeFormatError` 只取报错第一行并拆出行列号。
 - `test-extension.js` 的 vscode 桩按集合名分表（排版失败诊断与缺分号诊断互不覆盖），
   并补「语法错 → 波浪线 + 警告」「同错只提示一次」「修好后诊断消失」「开关关掉后静默」四条用例。
-- `formatter-core` 导出 `describeFormatError`，并把 `collapseCommaCommentGaps` 挂到 `_internals` 供逐步排查。
+- `formatter-core` 导出 `describeFormatError` / `applyStructureIndent`，并把 `collapseCommaCommentGaps` /
+  `startsInLiteral` 挂到 `_internals` 供逐步排查。
 
 ## [1.5.1] - 2026-10-08
 

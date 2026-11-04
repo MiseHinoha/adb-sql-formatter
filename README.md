@@ -206,7 +206,7 @@ select                       select                       select
 | `adbSqlFormatter.takeOverSaveKey` | `true` | 在上面那条打开的前提下接管 `Ctrl/Cmd+S`；关掉则只依赖保存钩子（可被别的键位方案影响） |
 | `adbSqlFormatter.requireSemicolonBetweenStatements` | `true` | 多语句文件的缺分号提示开关 |
 | `adbSqlFormatter.missingSemicolonSeverity` | `warning` | 提示级别，可改 `error` 标红 |
-| `adbSqlFormatter.indentMode` | `nested`（原型） | `from` / `join` / `where` / `and` 的缩进形态：`flat`（全部同一列）/ `nested`（续行深一级）/ `nested-on`（再把 `on` 拆行） |
+| `adbSqlFormatter.indentMode` | `nested` | `from` / `join` / `where` / `and` 的缩进形态：`flat`（全部同一列）/ `nested`（续行深一级）/ `nested-on`（再把 `on` 拆行） |
 | `adbSqlFormatter.notifyOnFormatError` | `true` | 排版失败（一般是语法错）时，在出错行画波浪线并弹一条带原因的提示；关掉则完全安静（文件照旧按原样保存） |
 
 ## 本地化
