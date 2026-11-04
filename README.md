@@ -169,6 +169,27 @@ VS Code（键位那条路径照旧自己处理）。
   之后保存走默认值、不再弹。**别把默认值设成 T-SQL 那一类**：它会按 T-SQL 规则重排 ADB 语法，
   `distribute by` / `comment` 这些会被改坏。
 
+### 结构缩进（`adbSqlFormatter.indentMode`）
+
+`from` / `join` / `where` / `and` 这些行默认全在同一列。查询一长（多表 join、多条件）就挤成一片，
+所以提供一个可选的缩进形态：
+
+```
+flat（默认/现状）              nested                       nested-on
+select                       select                       select
+    a.id                         a.id                         a.id
+    from ods_user a              from ods_user a              from ods_user a
+    left join ods_order b on …       left join ods_order b on …   left join ods_order b
+    left join dim_city c on …        left join dim_city c on …       on a.id = b.user_id
+    where a.dt = '${bizdate}'        where a.dt = '${bizdate}'    left join dim_city c
+    and b.status = 1                 and b.status = 1                on b.city_id = c.id
+                                     ↑ join 比 from 深一级          where a.dt = '${bizdate}'
+                                       and 比 where 深一级          and b.status = 1
+```
+
+规则一句话：**每个子句行 / join 行开启一个「体」，属于它的续行深一级**；括号块跟着开括号那一行
+整体平移。只改行首缩进，一个字符的内容都不动（多行字符串与块注释内部的行原样保留）。
+
 - **保存时没反应**：先看有没有波浪线。语法错导致排版失败时，本扩展会在出错行画一条波浪线并弹一条提示
   （`format-error`），文件按原样保存 —— 不会静默什么都不做，也不会吞掉你的内容。改好再保存，诊断自动消失。
   不想看这两样提示就关掉 `adbSqlFormatter.notifyOnFormatError`。
@@ -185,6 +206,7 @@ VS Code（键位那条路径照旧自己处理）。
 | `adbSqlFormatter.takeOverSaveKey` | `true` | 在上面那条打开的前提下接管 `Ctrl/Cmd+S`；关掉则只依赖保存钩子（可被别的键位方案影响） |
 | `adbSqlFormatter.requireSemicolonBetweenStatements` | `true` | 多语句文件的缺分号提示开关 |
 | `adbSqlFormatter.missingSemicolonSeverity` | `warning` | 提示级别，可改 `error` 标红 |
+| `adbSqlFormatter.indentMode` | `nested`（原型） | `from` / `join` / `where` / `and` 的缩进形态：`flat`（全部同一列）/ `nested`（续行深一级）/ `nested-on`（再把 `on` 拆行） |
 | `adbSqlFormatter.notifyOnFormatError` | `true` | 排版失败（一般是语法错）时，在出错行画波浪线并弹一条带原因的提示；关掉则完全安静（文件照旧按原样保存） |
 
 ## 本地化

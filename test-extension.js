@@ -474,6 +474,57 @@ async function runSaveTests() {
 	);
 	delete settings.notifyOnFormatError;
 
+	// ---- 1.6.0：结构缩进开关（indentMode）接线 ----
+	{
+		const sql =
+			'select a.id from ods_user a left join ods_order b on a.id = b.user_id where a.dt = 1 and b.status = 1';
+		const levelOf = (text, needle) => {
+			const line = text.split('\n').find((l) => l.trim().startsWith(needle));
+			return line === undefined ? -1 : (line.match(/^\t*/) || [''])[0].length;
+		};
+		const fmt = () =>
+			registered.formattingProvider.provideDocumentFormattingEdits(new FakeDocument(sql), { tabSize: 4 })[0].newText;
+		settings.indentMode = 'flat';
+		const flatText = fmt();
+		settings.indentMode = 'nested';
+		const nestedText = fmt();
+		settings.indentMode = 'nested-on';
+		const nestedOnText = fmt();
+		delete settings.indentMode;
+
+		const flatJoin = levelOf(flatText, 'left join');
+		check(
+			'indentMode=flat：join 与 from 同列',
+			flatJoin >= 1 && flatJoin === levelOf(flatText, 'from'),
+			JSON.stringify([flatJoin, levelOf(flatText, 'from')])
+		);
+		check(
+			'indentMode=nested：join 比 from 深一级、and 比 where 深一级',
+			levelOf(nestedText, 'left join') === flatJoin + 1 &&
+				levelOf(nestedText, 'and b.status') === levelOf(nestedText, 'where') + 1,
+			JSON.stringify([
+				levelOf(nestedText, 'left join'),
+				levelOf(nestedText, 'and b.status'),
+				levelOf(nestedText, 'where'),
+			])
+		);
+		check(
+			'indentMode=nested-on：on 条件独立成行',
+			/^\t+on a\.id = b\.user_id$/m.test(nestedOnText),
+			JSON.stringify(nestedOnText)
+		);
+		const manifestIndent =
+			require('./package.json').contributes.configuration.properties['adbSqlFormatter.indentMode'];
+		check(
+			'manifest：indentMode 声明三个取值且默认值在取值里',
+			!!manifestIndent &&
+				['flat', 'nested', 'nested-on'].every((v) => manifestIndent.enum.includes(v)) &&
+				manifestIndent.enum.includes(manifestIndent.default),
+			JSON.stringify(manifestIndent && { enum: manifestIndent.enum, default: manifestIndent.default })
+		);
+	}
+
+
 
 	// ---- Ctrl+S 命令：文件没改动时也要格式化并保存 ----
 	const fakeEditor = (doc) => ({

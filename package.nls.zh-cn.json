@@ -8,6 +8,7 @@
 	"adbSqlFormatter.formatOnSave": "保存时自动格式化 sql / mysql 文件 —— 唯一的开关。关着时保存绝不重排（本扩展还会把编辑器自己的 editor.formatOnSave 也对 sql / mysql 关掉 —— 那是另一条路，运行时拦不住）。手动排版完全不受影响：Shift+Alt+F、右键菜单、命令面板。",
 	"adbSqlFormatter.takeOverSaveKey": "在 sql / mysql 编辑器里接管 Ctrl+S / Cmd+S：先格式化再保存。若这个键该归你的键位方案，关掉它即可（改用命令「格式化并保存」或自己绑一个键）。",
 	"adbSqlFormatter.notifyOnFormatError": "排版失败时（一般是语法错）在出错行画波浪线并弹一条提示，而不是静默地按原样保存。关掉则完全安静。",
+	"adbSqlFormatter.indentMode": "from / join / where 这些行的缩进形态。flat 保持以前的样子（子句、join、and/or 续行全在同一列）；nested 让每个 join、每条 and/or 续行相对所属子句缩进一级；nested-on 再把每个 join 的 on 条件单独成行（最深、最啰嗦）。",
 	"adbSqlFormatter.command.formatAndSave": "格式化并保存",
 	"adbSqlFormatter.command.formatDocument": "格式化文档（ADB SQL Formatter）"
 }

@@ -897,6 +897,136 @@ function collapseCommaCommentGaps(text) {
 }
 
 // ---------------------------------------------------------------------------
+// 结构缩进（可选）：adbSqlFormatter.indentMode
+//   flat      = 现状：from / join / where / and 全挤在同一列
+//   nested    = 每个子句行 / join 行开启一个「体」，属于它的续行深一级
+//   nested-on = nested + 把 `left join t on <cond>` 拆成两行，on 再深一级
+// 这一层在 tab 层做（toTabs 之后、reformatDdl 之前），只改行首缩进，内容一个字符都不动：
+//   - 多行字符串 / 块注释内部的行一律原样放行 —— 把 tab 打进引号里就是改数据，
+//     ab 闸会判「真动代码」；
+//   - 括号块随开括号那一行的增量整体平移，块内相对结构不变；
+//   - 幂等：owner 只在「基准缩进相同」的行之间认领，所以再跑一遍结果不变。
+// ---------------------------------------------------------------------------
+const STRUCT_CLAUSE_RE =
+	/^(select|from|where|group by|having|order by|limit|offset|window|values|set|insert|create table|union)\b/i;
+const STRUCT_JOIN_RE =
+	/^(?:(?:left|right|inner|cross|full|natural|straight_join)\s+)*(?:outer\s+)?join\b/i;
+const STRUCT_CONT_RE = /^(and|or)\b/i;
+
+// 行首是否落在多行字符串 / 块注释内部（这些行不许重排缩进）
+function startsInLiteral(text) {
+	const count = text.split('\n').length;
+	const flags = new Array(count).fill(false);
+	let quote = null;
+	let block = false;
+	let line = 0;
+	for (let i = 0; i < text.length; i++) {
+		const c = text[i];
+		if (c === '\n') {
+			line++;
+			if (line < count) flags[line] = !!quote || block;
+			continue;
+		}
+		if (quote) {
+			if (c === quote && text[i - 1] !== '\\') quote = null;
+			continue;
+		}
+		if (block) {
+			if (c === '*' && text[i + 1] === '/') {
+				block = false;
+				i++;
+			}
+			continue;
+		}
+		if (c === "'" || c === '"' || c === '`') quote = c;
+		else if (c === '/' && text[i + 1] === '*') {
+			block = true;
+			i++;
+		}
+	}
+	return flags;
+}
+
+// 本行里深度 0 处的 `on`（入参已掩码，引号/注释内容被抹成空格），nested-on 据此拆行
+function topLevelOnIndex(masked) {
+	let depth = 0;
+	for (let i = 0; i < masked.length; i++) {
+		const c = masked[i];
+		if (c === '(') depth++;
+		else if (c === ')') depth = Math.max(0, depth - 1);
+		else if (
+			depth === 0 &&
+			(c === 'o' || c === 'O') &&
+			/^on\s/i.test(masked.slice(i, i + 3)) &&
+			(i === 0 || /\s/.test(masked[i - 1]))
+		) return i;
+	}
+	return -1;
+}
+
+function applyStructureIndent(text, mode) {
+	if (mode !== 'nested' && mode !== 'nested-on') return text;
+	const splitOn = mode === 'nested-on';
+	const lines = text.split('\n');
+	const maskedLines = maskLiterals(text).split('\n');
+	const literal = startsInLiteral(text);
+	const scopes = new Map();
+	const frame = [];
+	const out = [];
+	let depth = 0;
+	const scopeAt = (d) => {
+		if (!scopes.has(d)) scopes.set(d, { clause: null, join: null });
+		return scopes.get(d);
+	};
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i];
+		const base = (line.match(/^\t*/) || [''])[0].length;
+		const body = line.slice(base);
+		const masked = maskLiterals(body).replace(/^\s+/, '');
+		const xParent = frame.length ? frame[frame.length - 1] : 0;
+		const sc = scopeAt(depth);
+		const skip = literal[i];
+		const isClause = !skip && STRUCT_CLAUSE_RE.test(masked);
+		const isJoin = !skip && !isClause && STRUCT_JOIN_RE.test(masked);
+		const isCont = !skip && !isClause && !isJoin && STRUCT_CONT_RE.test(masked);
+		let x = xParent;
+		if (isJoin) {
+			if (sc.clause && sc.clause.base === base) x = sc.clause.x + 1;
+		} else if (isCont) {
+			const owner =
+				sc.join && sc.join.base === base ? sc.join : sc.clause && sc.clause.base === base ? sc.clause : null;
+			if (owner) x = owner.x + 1;
+		}
+		const onAt = splitOn && isJoin ? topLevelOnIndex(maskLiterals(body)) : -1;
+		const pad = '\t'.repeat(Math.max(0, base + x));
+		if (onAt > 0) {
+			// 拆行：`left join t on <cond>` → 表/别名一行、on 条件再深一级
+			out.push(pad + body.slice(0, onAt).replace(/[ \t]+$/, ''));
+			out.push('\t'.repeat(Math.max(0, base + x + 1)) + body.slice(onAt).replace(/^\s+/, ''));
+		} else {
+			out.push(skip ? line : pad + body);
+		}
+		// 括号深度与帧：每行按原始行只算一次（拆成两行时不能重复计）
+		for (const ch of maskedLines[i]) {
+			if (ch === '(') {
+				frame.push(x);
+				depth++;
+			} else if (ch === ')') {
+				depth = Math.max(0, depth - 1);
+				frame.pop();
+			}
+		}
+		if (skip) continue;
+		if (isJoin) sc.join = { base, x };
+		else if (isClause) {
+			sc.clause = { base, x };
+			sc.join = null;
+		}
+	}
+	return out.join('\n');
+}
+
+// ---------------------------------------------------------------------------
 // 换行符归一：核心只认 \n
 // sql-formatter 会把块注释内容原样带出 —— CRLF 文档里注释正文的 \r 就这样活到输出里，
 // 而后面每一环（toTabs / joinShortLists / reformatDdl）都按 \n 切分再 join，
@@ -931,7 +1061,9 @@ function formatSql(text, cfg, tabWidth) {
 	const tabbed = toTabs(collapseCommaCommentGaps(formatted), tabWidth);
 	const merged = joinShortLists(tabbed, cfg.expressionWidth);
 	const windowed = inlineWindowSpecs(merged, cfg.expressionWidth);
-	return normalizeEol(reformatDdl(windowed));
+	// 结构缩进（可选）：flat = 现状；nested / nested-on 见 applyStructureIndent
+	const indented = applyStructureIndent(windowed, cfg.indentMode || 'flat');
+	return normalizeEol(reformatDdl(indented));
 }
 
 // ---------------------------------------------------------------------------
@@ -962,6 +1094,8 @@ module.exports = {
 	describeFormatError,
 	// 补进方言函数表的 ADB/DataWorks 函数名；测试据此断言「紧贴括号」行为，避免名单两处维护
 	EXTRA_FUNCTION_NAMES,
+	// 结构缩进：indentMode 的三个取值由它实现，测试据此逐步比对
+	applyStructureIndent,
 	// 供测试脚本逐步排查内部环节
 	_internals: {
 		formatDialect,
@@ -984,6 +1118,9 @@ module.exports = {
 		toEol,
 		collapseCommaCommentGaps,
 		hasTrailingLineComment,
+		applyStructureIndent,
+		startsInLiteral,
+		topLevelOnIndex,
 		describeFormatError,
 	},
 };

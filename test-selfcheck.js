@@ -259,6 +259,73 @@ check(
 	JSON.stringify(errInfo && errInfo.message)
 );
 
+// 1.6.0 结构缩进（可选）：indentMode = flat / nested / nested-on
+console.log('');
+const structured = [
+	'select',
+	'a.id',
+	', b.amount',
+	'from ods_user a',
+	'left join ods_order b on a.id = b.user_id',
+	'left join dim_city c on b.city_id = c.id',
+	"where a.dt = '${bizdate}'",
+	'and b.status = 1',
+	'and c.city in (\'北京\', \'上海\');',
+].join('\n');
+const flatOut = formatSql(structured, cfg, 4);
+const nestedOut = formatSql(structured, { ...cfg, indentMode: 'nested' }, 4);
+const nestedOnOut = formatSql(structured, { ...cfg, indentMode: 'nested-on' }, 4);
+const indentOf = (text, needle) => {
+	const line = text.split('\n').find((l) => l.trim().startsWith(needle));
+	return line === undefined ? -1 : (line.match(/^\t*/) || [''])[0].length;
+};
+check('结构缩进：flat 与不传 indentMode 完全一致', flatOut === formatSql(structured, { ...cfg, indentMode: 'flat' }, 4));
+check(
+	'结构缩进：nested 把 join / and 各降一级',
+	indentOf(flatOut, 'from') === 1 &&
+		indentOf(flatOut, 'left join') === 1 &&
+		indentOf(nestedOut, 'from') === 1 &&
+		indentOf(nestedOut, 'left join') === 2 &&
+		indentOf(nestedOut, 'and b.status') === 2,
+	JSON.stringify([indentOf(nestedOut, 'from'), indentOf(nestedOut, 'left join'), indentOf(nestedOut, 'and b.status')])
+);
+check(
+	'结构缩进：nested-on 再把 on 条件拆成独立一行、比 join 深一级',
+	indentOf(nestedOnOut, 'left join') === 2 &&
+		indentOf(nestedOnOut, 'on a.id') === 3 &&
+		/\n\t\tleft join ods_order b\n\t\t\ton a\.id = b\.user_id/.test(nestedOnOut),
+	JSON.stringify(nestedOnOut.split('\n').slice(4, 10))
+);
+check('结构缩进：nested 幂等', formatSql(nestedOut, { ...cfg, indentMode: 'nested' }, 4) === nestedOut);
+check('结构缩进：nested-on 幂等', formatSql(nestedOnOut, { ...cfg, indentMode: 'nested-on' }, 4) === nestedOnOut);
+check('结构缩进：nested 不改变代码骨架', skeleton(nestedOut) === skeleton(flatOut));
+check('结构缩进：nested-on 不改变代码骨架', skeleton(nestedOnOut) === skeleton(flatOut));
+// 真坑：多行字符串内部的第二行不许被补缩进（补了就是把 tab 打进引号里 = 改数据）
+const multiline = "select a.id, a.note\nfrom ods_user a\nwhere a.note in ('第一行\n第二行')\nand a.x > 0;";
+for (const mode of ['nested', 'nested-on']) {
+	const out = formatSql(multiline, { ...cfg, indentMode: mode }, 4);
+	check(
+		`结构缩进/${mode}：多行字符串内部原样（不补 tab）`,
+		skeleton(out) === skeleton(formatSql(multiline, cfg, 4)) && !/\n\t第二行/.test(out),
+		JSON.stringify(out.split('\n').slice(2, 4))
+	);
+}
+// 语料压测：每个 fixture 在两种模式下都要求「骨架不变 + 幂等」
+console.log('');
+const fixtures = fs.readdirSync(path.join(__dirname, 'test', 'fixtures')).filter((f) => /\.sql$/i.test(f));
+fixtures.forEach((f) => {
+	const src = fs.readFileSync(path.join(__dirname, 'test', 'fixtures', f), 'utf8');
+	const flat = formatSql(src, cfg, 4);
+	['nested', 'nested-on'].forEach((mode) => {
+		const out = formatSql(src, { ...cfg, indentMode: mode }, 4);
+		check(
+			`结构缩进/${mode}/${f}：骨架不变且幂等`,
+			skeleton(out) === skeleton(flat) && formatSql(out, { ...cfg, indentMode: mode }, 4) === out
+		);
+	});
+});
+
+
 
 // 缺分号检测：fixture 里最后一条没有分号，属「末条不报」，前面几条都带分号
 const ddlText = fs.readFileSync(path.join(fixtureDir, 'ddl.sql'), 'utf8');

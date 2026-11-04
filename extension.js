@@ -36,6 +36,9 @@ function getConfig() {
 		formatOnSave: c.get('formatOnSave', false),
 		takeOverSaveKey: c.get('takeOverSaveKey', true),
 		reportFormatError: c.get('notifyOnFormatError', true),
+		// 结构缩进形态：flat / nested / nested-on（核心 applyStructureIndent 实现）。
+		// 原型阶段默认开成 nested —— 装上就能看到效果；正式发版的默认值待定。
+		indentMode: c.get('indentMode', 'nested'),
 	};
 }
 
