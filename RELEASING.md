@@ -16,25 +16,33 @@ npm run package          # 输出到 dist/adb-sql-formatter-<版本>.vsix
 ## 通道二：打 tag 自动发布（长期方案，见 `.github/workflows/publish.yml`）
 
 > 已知坑：`vsce` **4.0.0** 的 `--oidc` 在换 Marketplace 凭据时请求没带 `api-version`，会直接 400
-> （`No api-version was supplied for the POST request`）。`4.0.1-1` 起已修（URL 补 `?api-version=7.2-preview.1`），
-> 工作流里已钉住该版本；等 4.0.1 正式版出来可以换成 `@4.0.1`。
+> （`No api-version was supplied for the POST request`）。`4.0.1-1` 起已修；
+> **trusted publishing 正式开放（2026-10-28）时官方发布的是 `4.1.0`**，工作流已钉在它上面
+> （`4.1.0` 才包含 #1337 对齐 Marketplace 的交换契约、#1345 的 `X-Market-CI-Provider` 头，
+> 官方与社区都是用这个版本验证通过的）。
 
 前置条件（只需配一次，在 Marketplace 网页上做）：
 
-1. 登录 <https://marketplace.visualstudio.com/manage/publishers/YipTszkwan>；
-2. 给这个 publisher 配置 trusted publishing policy，指向仓库 `MiseHinoha/adb-sql-formatter`
-   与 workflow 文件名 `publish.yml`（要是表单里还要求填 Environment，就把环境名一并写进工作流）；
-3. 把仓库变量 `MARKETPLACE_TRUSTED_PUBLISHING` 设为 `true`（Settings → Secrets and variables →
+1. 登录 <https://marketplace.visualstudio.com/manage/publishers/YipTszkwan>，选 publisher →
+   **Trusted Publishing** → 展开 **Create**，按官方字段填：
+   - **Policy name**：随便写，如 `Release workflow`
+   - **Repository owner**：`MiseHinoha`
+   - **Repository**：`adb-sql-formatter`
+   - **Workflow**：`publish.yml`（只写文件名，大小写敏感，不写 `.github/workflows/` 路径）
+   - **Environment**：**留空**（本工作流没有用 GitHub environment）
+2. 把仓库变量 `MARKETPLACE_TRUSTED_PUBLISHING` 设为 `true`（Settings → Secrets and variables →
    Actions → Variables）；
-4. 之后 `git tag v1.5.1 && git push origin v1.5.1` 就会自动：跑 `npm test` → 校验 tag 与
+3. 之后 `git tag v1.5.1 && git push origin v1.5.1` 就会自动：跑 `npm test` → 校验 tag 与
    `package.json` 版本一致 → 打包 → 发 Marketplace → 建同名 GitHub Release 并挂上 vsix。
 
-> **当前状态（2026-10）：第 1、2 步还做不了** —— Marketplace 侧**没有放出 trust policy 的配置入口**，
-> 服务端对这类请求直接回 `Trusted Publishing is not supported.`（其它 publisher 同样如此：
-> `microsoft/vsmarketplace#1422`、`JuanTorchia/certificate-viewer-open-vscode#85`）。
-> 所以现在用**通道一**（手工上传）发版；工作流里「发市场」那一步由仓库变量把关，
-> 未设为 `true` 时 tag 只做自测 + 打包 + 建 GitHub Release，并在运行摘要里说明跳过了发布
-> —— 这样打 tag 不会再出红色 CI。入口一旦开放：按上面 1–3 步配好、设变量，就恢复全自动。
+> **状态（2026-11-09 起）：入口已开放**。Marketplace 于 **2026-10-28** 正式发布 trusted
+> publishing（官方博客 + `microsoft/vscode-docs`），服务端换票端点从
+> `Trusted Publishing is not supported.` 变成按 `FederatedToken` 方案校验 token：
+> 带假 token 打 `_apis/gallery/token` 现在回
+> `The token could not be exchanged for the specified publisher.`（401），
+> 说明端点已上线、只剩 publisher 侧的 policy 没配。
+> 也就是说上面第 1、2 步现在能做了；配好并跑通一次验证后，把工作流里的仓库变量设为 `true`，
+> 就恢复全自动发布，手工上传可以彻底退役。
 
 **为什么不用 PAT**：Azure DevOps 的全局 Personal Access Token 于 **2026-12-01 退役**，
 现在建 PAT 等于给自己埋一个到期日。trusted publishing 走 OIDC：workflow 向 GitHub 要一个
@@ -47,7 +55,9 @@ npm run package          # 输出到 dist/adb-sql-formatter-<版本>.vsix
 加 `--skip-duplicate` 去撞一次，认证链走通就成功退出、不会改动任何已上架内容。
 这样能在真发布之前确认 policy、`id-token: write`、工作流文件名三处都对得上。
 
-> 现在跑这一步会红（policy 入口还没开），属于预期现象，不是配置写错。
+> 这一跑不需要先把仓库变量设为 `true`，也不会发布任何东西 —— 只要 policy 配对了就会绿。
+> policy 没建或字段（owner/repo/workflow/Environment）对不上时，这一步会红在换票处，
+> 报 `The token could not be exchanged for the specified publisher.`——那是 policy 问题，不是凭据问题。
 
 ## 版本号规则
 
