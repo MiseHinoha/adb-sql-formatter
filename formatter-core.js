@@ -24,8 +24,59 @@ const EXTRA_FUNCTION_NAMES = [
 	'NVL', 'DATE_TRUNC', 'MONTHS_BETWEEN', 'ARRAY_AGG', 'TO_TIMESTAMP',
 	'TO_DATE', 'TO_UNIXTIME', 'DATE_DIFF', 'REGEXP_EXTRACT', 'CARDINALITY',
 ];
-// DataWorks 调度占位符 ${bizdate} / ${yesterday} 等，按自定义参数识别避免被拆坏
+// DataWorks 调度占位符 ${bizdate} / ${yesterday} 等，按自定义参数识别避免被拆坏。
+// 注意：整段 ${...} 现在先被下面的 protectParams 遮住再排版，这条正则只是兜底（遮不住的形态仍按参数处理）。
 const PARAM_REGEX = String.raw`\$\{[a-zA-Z0-9_.]+\}`;
+
+// 交接/调度用的参数占位符：${bizdate}，以及带格式说明的中文占位符 ${年月：格式yyyymm。如：202611}。
+// 不支持反引号套表名的库上，占位符直接贴在表名尾部：order_gift_send_record_${年月...}。
+// mysql 方言把 $ 当标识符字符（identChars.first/rest 都含 $）⇒ 排版器从标识符开头一路吞到 $，
+// 下一个 { 没有任何规则能匹配，于是抛「Parse error: Unexpected "{"」；加宽 PARAM_REGEX 救不了 ——
+// 扫描位置已在标识符内部，参数规则根本没机会触发（实测报错列正好落在 { 上）。
+// 做法：排版前把整段 ${...} 换成等长的占位标记（只含标识符字符，与相邻标识符连成一个 token），
+// 排完再按标记换回原文：占位符既不参与断词，也不会被插入空格。
+const PARAM_MARK = '__adbparam';
+const PARAM_MAX_LEN = 200;
+
+function protectParams(text) {
+	const marks = [];
+	if (text.indexOf('${') < 0) return { text, marks };
+	// 标记前缀必须保证原文里没有，否则还原时会误伤用户自己写的内容
+	const head = text.indexOf(PARAM_MARK) < 0 ? PARAM_MARK : PARAM_MARK + 'zz';
+	let out = '';
+	for (let i = 0; i < text.length; i++) {
+		if (text[i] === '$' && text[i + 1] === '{') {
+			let j = i + 2;
+			let closed = false;
+			for (; j < text.length && j - i <= PARAM_MAX_LEN + 2; j++) {
+				const ch = text[j];
+				if (ch === '}') {
+					closed = j > i + 2;
+					break;
+				}
+				// 不跨行、不跨语句、不吞引号：隔着这些字符的 ${ 更像坏 SQL，交给报错而不是硬修
+				if (ch === '\n' || ch === '\r' || ch === ';' || ch === "'" || ch === '"' || ch === '`') break;
+			}
+			if (closed) {
+				const raw = text.slice(i, j + 1);
+				const tail = '_' + marks.length + 'q__';
+				const pad = Math.max(0, raw.length - head.length - tail.length);
+				const mark = head + 'x'.repeat(pad) + tail;
+				marks.push({ mark, raw });
+				out += mark;
+				i = j;
+				continue;
+			}
+		}
+		out += text[i];
+	}
+	return { text: out, marks };
+}
+
+function restoreParams(text, marks) {
+	for (const m of marks) text = text.split(m.mark).join(m.raw);
+	return text;
+}
 
 function buildDialect() {
 	const clauses = mysql.tokenizerOptions.reservedClauses.filter(
@@ -707,7 +758,10 @@ function findTopLevelSemicolon(text) {
 }
 
 function formatCreateTable(statement) {
-	const headMatch = statement.match(/^create\s+table\s+(if\s+not\s+exists\s+)?([`0-9a-zA-Z_.]+)\s*/i);
+	// 表名取到 `(` 之前：先吃反引号整段（里面可能有 ${...} 与 $），再退回普通标识符。
+	// 原来的字符类不含 $ —— 表名里一出现 $，headMatch 就只匹配到 $ 之前，
+	// 后缀（`$2026` / `${年月...}`）被当成「名字后面的东西」丢掉 = 静默改表名。
+	const headMatch = statement.match(/^create\s+table\s+(if\s+not\s+exists\s+)?(`[^`\n]*`|[`0-9a-zA-Z_$.]+)\s*/i);
 	if (!headMatch) return null;
 	const afterHead = headMatch[0].length;
 	const rest = statement.slice(afterHead);
@@ -1046,24 +1100,32 @@ function toEol(text, eol) {
 }
 
 function formatSql(text, cfg, tabWidth) {
-	const formatted = formatDialect(normalizeEol(text), {
-		dialect: buildDialect(),
-		keywordCase: cfg.keywordCase,
-		commaPosition: 'before',
-		useTabs: false,
-		tabWidth,
-		expressionWidth: cfg.expressionWidth,
-		linesBetweenQueries: cfg.linesBetweenQueries,
-		logicalOperatorNewline: cfg.logicalOperatorNewline,
-		paramTypes: { custom: [{ regex: PARAM_REGEX }] },
-	});
+	const guarded = protectParams(normalizeEol(text));
+	let formatted;
+	try {
+		formatted = formatDialect(guarded.text, {
+			dialect: buildDialect(),
+			keywordCase: cfg.keywordCase,
+			commaPosition: 'before',
+			useTabs: false,
+			tabWidth,
+			expressionWidth: cfg.expressionWidth,
+			linesBetweenQueries: cfg.linesBetweenQueries,
+			logicalOperatorNewline: cfg.logicalOperatorNewline,
+			paramTypes: { custom: [{ regex: PARAM_REGEX }] },
+		});
+	} catch (e) {
+		// 报错正文里会带出错片段，里面可能是占位标记 —— 换回原文再交给 describeFormatError
+		if (e && typeof e.message === 'string') e.message = restoreParams(e.message, guarded.marks);
+		throw e;
+	}
 	// 行尾注释后面多出来的空行先吃掉（见 collapseCommaCommentGaps），再折算 tab 缩进
 	const tabbed = toTabs(collapseCommaCommentGaps(formatted), tabWidth);
 	const merged = joinShortLists(tabbed, cfg.expressionWidth);
 	const windowed = inlineWindowSpecs(merged, cfg.expressionWidth);
 	// 结构缩进（可选）：flat = 现状；nested / nested-on 见 applyStructureIndent
 	const indented = applyStructureIndent(windowed, cfg.indentMode || 'flat');
-	return normalizeEol(reformatDdl(indented));
+	return restoreParams(normalizeEol(reformatDdl(indented)), guarded.marks);
 }
 
 // ---------------------------------------------------------------------------

@@ -38,7 +38,9 @@ DML 侧：
 - 多行字段列表逗号前置，首行不带逗号；`group by 1, 2` 等能放进一行的短列表保持行内
 - 逗号行与同级内容行缩进一致 —— 每级宽度按 `editor.tabSize` 折算，2 / 3 / 4 / 8 都对齐
 - `from 表` / `where 条件` / `left join ... on ...` 与关键字同行（DataGrip 风格）
-- `insert overwrite table x partition (dt = '${bizdate}')` 保持一行；DataWorks 占位符 `${bizdate}` 不拆坏
+- `insert overwrite table x partition (dt = '${bizdate}')` 保持一行；DataWorks 占位符 `${bizdate}` 与交接用的说明式占位符
+  `${年月：格式yyyymm。如：202611}` 都不拆坏 —— 贴在表名尾部（`order_gift_send_record_${…}`，不支持反引号的引擎上就这么写）
+  也照样排：占位符原文一字不改、与表名之间不插空格、不参与断行；`create table` 表名里带 `$` 也不会被截断
 - 窗口子句不换行：`row_number() over (partition by ... order by ...)` 排成一行，
   **只有整行超过 `expressionWidth` 时才拆开**；`over (` 的空格照旧保留
 - ADB 专有函数（`nvl` / `date_trunc` / `months_between` / `array_agg` / `to_timestamp` / `to_date` /
@@ -263,6 +265,8 @@ npm run package          # vsce 打包 vsix（输出到 dist/）
 - 语句边界与缺分号判定是「括号深度 + 顶层语句关键字」启发式，不是完整方言语法树，
   极端写法可能漏报或误报，因此默认级别是警告
 - `create table t (select ...)` 这类括号内含查询体的形态不参与建表重排，保持原样
+- 占位符只遮「闭合、单行、不含引号与 `;`」的 `${…}`：`${` 没闭合、空 `${}`、跨行或含引号的形态不处理，
+  该处仍按「排版失败」报错并画波浪线（真坏 SQL 不做硬修）
 
 ## 许可
 

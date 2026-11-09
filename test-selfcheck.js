@@ -327,6 +327,48 @@ fixtures.forEach((f) => {
 
 
 
+// 交接给运营的占位符：${bizdate}、带格式说明的中文 ${年月：格式yyyymm。如：202611}
+// 坑：mysql 方言把 $ 当标识符字符，占位符贴在表名尾部时排版器会抛 Parse error: Unexpected "{"
+console.log('');
+const PH = '${年月：格式yyyymm。如：202611}';
+const phSrc = [
+	'select',
+	'a.id',
+	', b.amount',
+	'from order_gift_send_record_' + PH + ' a',
+	'left join dim_' + PH + ' b on a.id = b.user_id',
+	"where a.dt = '${bizdate}'",
+	'and b.kind = ${kind};',
+].join('\n');
+let phOut = '';
+let phErr = '';
+try {
+	phOut = formatSql(phSrc, cfg, 4);
+} catch (e) {
+	phErr = e.message.slice(0, 120);
+}
+check('占位符：贴表名尾部也能排版（不再 Parse error）', phErr === '', phErr);
+check('占位符：原文一字不差留在输出里', phOut.indexOf('order_gift_send_record_' + PH) >= 0 && phOut.indexOf('dim_' + PH) >= 0);
+check('占位符：表名与占位符之间不被插入空格', !/[A-Za-z0-9_]\s+\$\{/.test(phOut), JSON.stringify(phOut.split('\n').filter((l) => l.indexOf('${') >= 0)));
+check('占位符：输出里不留内部占位标记', phOut.indexOf('__adbparam') < 0);
+check('占位符：多处占位符互不串位', phOut.split(PH).length === 3 && phOut.indexOf('b.kind = ${kind}') >= 0, phOut.split(PH).length - 1 + ' 处长占位符');
+check('占位符：二次格式化幂等', phOut !== '' && formatSql(phOut, cfg, 4) === phOut);
+check('占位符：代码骨架不变', phOut !== '' && skeleton(phOut) === skeleton(phSrc));
+
+// 建表表名里的 $（合法标识符字符，也是 ${...} 的开头）：headMatch 原来的字符类不含 $，
+// 匹配到 $ 就断，后缀被当成「名字后面的东西」丢掉 —— 静默改表名，比报错危险得多
+['`dwd_gift$2026`', 'dwd_gift$2026', '`dwd_gift_${ym}`'].forEach((name) => {
+	const ddlSrc = 'create table ' + name + " (id bigint not null comment '主键', primary key (id)) comment '工具';";
+	let out = '';
+	try {
+		out = formatSql(ddlSrc, cfg, 4);
+	} catch (e) {
+		out = '';
+	}
+	check('建表：表名里的 $ 不被吃掉', out.indexOf(name) === 0 || out.split('\n')[0].indexOf(name) >= 0, JSON.stringify(out.split('\n')[0] || ''));
+	check('建表：带 $ 的表名二次格式化幂等', out !== '' && formatSql(out, cfg, 4) === out);
+});
+
 // 缺分号检测：fixture 里最后一条没有分号，属「末条不报」，前面几条都带分号
 const ddlText = fs.readFileSync(path.join(fixtureDir, 'ddl.sql'), 'utf8');
 const { segments, missing } = findStatements(ddlText);

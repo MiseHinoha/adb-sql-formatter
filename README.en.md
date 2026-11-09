@@ -45,7 +45,10 @@ On the DML side:
 - `from table` / `where predicate` / `left join ... on ...` stay on the same line as the keyword
   (DataGrip style)
 - `insert overwrite table x partition (dt = '${bizdate}')` stays on one line; DataWorks placeholders
-  such as `${bizdate}` are never split
+  such as `${bizdate}` and hand-off placeholders like `${年月：格式yyyymm。如：202611}` are never split, including
+  when one sits at the end of a table name (`order_gift_send_record_${…}` — how you write it on engines that
+  do not accept backticks): the text is kept verbatim, no space is inserted before it, and a `$` inside a
+  `create table` name is never truncated
 - Window clauses stay on one line: `row_number() over (partition by ... order by ...)`; it is only
   broken up when the line exceeds `expressionWidth`. The space in `over (` is preserved
 - ADB-specific functions (`nvl`, `date_trunc`, `months_between`, `array_agg`, `to_timestamp`,
@@ -272,6 +275,8 @@ trusted publishing — no PAT is stored anywhere).
   why the default severity is a warning
 - Shapes where the parentheses contain a query body (`create table t (select ...)`) are excluded from
   the `CREATE TABLE` rework and left as they are
+- Only a closed, single-line `${…}` without quotes or `;` is protected; an unclosed `${`, an empty `${}`, or one
+  spanning lines / containing quotes is left alone and still reported as a format error on that line
 
 ## License
 
