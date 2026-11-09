@@ -41,8 +41,10 @@ npm run package          # 输出到 dist/adb-sql-formatter-<版本>.vsix
 > 带假 token 打 `_apis/gallery/token` 现在回
 > `The token could not be exchanged for the specified publisher.`（401），
 > 说明端点已上线、只剩 publisher 侧的 policy 没配。
-> 也就是说上面第 1、2 步现在能做了；配好并跑通一次验证后，把工作流里的仓库变量设为 `true`，
-> 就恢复全自动发布，手工上传可以彻底退役。
+> 切换已于 **2026-11-09** 完成：policy 建好（owner `MiseHinoha` / repo `adb-sql-formatter` /
+> workflow `publish.yml` / Environment 留空）、`verify_only` 验证跑通（run 42567513324，换票成功、
+> 未发布任何内容）、仓库变量 `MARKETPLACE_TRUSTED_PUBLISHING` 已设为 `true`。
+> 从那以后推 `v*` tag 即全自动发布；要临时关掉把该变量改回 `false` 或删掉即可。
 
 **为什么不用 PAT**：Azure DevOps 的全局 Personal Access Token 于 **2026-12-01 退役**，
 现在建 PAT 等于给自己埋一个到期日。trusted publishing 走 OIDC：workflow 向 GitHub 要一个
