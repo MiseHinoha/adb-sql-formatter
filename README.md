@@ -48,6 +48,13 @@ DML 侧：
   表名位置的 `insert into t (a, b)` 的空格照旧保留
 - 缩进一律输出 tab
 - `--` 与 `/* */` 注释原样保留
+- 长逗号列表按屏宽打包：`where x in (...)` 这类列表整段放不下时，每行装到 `expressionWidth` 为止
+  （50 个 id 从 51 行降到 3 行）；整段放得下就保持一行
+- 括号块能一行看完就不拆：条件分组、条件里的子查询、短 CTE 体、派生表压回一行，
+  超过 `expressionWidth` 才保持多行
+- 条件同类合行：`where` / `having` / `on` 里同列（`dt >= …` 与 `dt <= …`）或同运算符
+  （都 `=` / 都 `in` / 都 `between`）的条件合到一行 —— 只合行，条件顺序与运算符一个不动
+- 三条换行规则都带守卫：带行内注释的块、跨行字符串、`create table` 的列定义一律原样不动
 
 ## 分号策略
 
@@ -196,6 +203,51 @@ select                       select                       select
   （`format-error`），文件按原样保存 —— 不会静默什么都不做，也不会吞掉你的内容。改好再保存，诊断自动消失。
   不想看这两样提示就关掉 `adbSqlFormatter.notifyOnFormatError`。
 
+### 换行打包：长列表 / 括号块 / 条件链
+
+三个开关默认全开，宽度统一取 `expressionWidth`（默认 100，含缩进）。三条规则都**只改换行与空白**：
+token 一个不动，运算符顺序与括号结构原样。
+
+**长逗号列表按行宽打包**（`adbSqlFormatter.packLongLists`）—— 一条一行的 50 个 id 变成 3 行：
+
+```sql
+where shop_id in (
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25
+    , 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48
+    , 49, 50
+)
+```
+
+首行不带逗号、续行前置逗号（与字段列表同一风格）；单个条目自己就超宽时退化成一条一行。
+
+**括号块能一行看完就不拆**（`adbSqlFormatter.wrapShortBlocks`）：
+
+```sql
+-- 条件分组：以前 9 行
+where ((a = 1 and b = 2) or (c = 3 and d = 4));
+-- 条件里的子查询
+where o.user_id in (select id from t_user where level > 3)
+-- 短 CTE 体
+base as (select id, name from t_user where dt = '20261101')
+```
+
+从最内层往外合、整行宽度不超上限才合 —— 所以长条件会停在「`or` 分组各占一行」这种可读粒度，不会压成超长行。
+
+**条件同类同义合行**（`adbSqlFormatter.packConditions`）—— 相邻两条条件满足下面任一条就算同类，先归组再按行宽装填：
+
+- 同一个左值：`o.dt >= '20260101'` 与 `o.dt <= '20260131'`
+- 同一个运算符：都 `=`、都 `in`、都 `between` …
+
+```sql
+where o.dt >= '20260101' and o.dt <= '20260131'
+    and o.status = 1 and o.pay_status = 2 and o.city_code = '440300' and o.shop_type = 3
+    and o.order_amt > 100 and o.user_level between 1 and 5;
+```
+
+`and` / `or` 混排时只合并行、不跨运算符归组，条件顺序原样保留。
+
+守卫（三条规则共用）：带行内注释的块 / 条件、跨行字符串、块注释、`create table` 整段 —— 一律不动。
+
 ## 设置项
 
 | 配置 | 默认 | 说明 |
@@ -209,6 +261,9 @@ select                       select                       select
 | `adbSqlFormatter.requireSemicolonBetweenStatements` | `true` | 多语句文件的缺分号提示开关 |
 | `adbSqlFormatter.missingSemicolonSeverity` | `warning` | 提示级别，可改 `error` 标红 |
 | `adbSqlFormatter.indentMode` | `nested` | `from` / `join` / `where` / `and` 的缩进形态：`flat`（全部同一列）/ `nested`（续行深一级）/ `nested-on`（再把 `on` 拆行） |
+| `adbSqlFormatter.wrapShortBlocks` | `true` | 括号块（条件分组、子查询、CTE 体、派生表）整行放得下就合回一行 |
+| `adbSqlFormatter.packLongLists` | `true` | 长逗号列表（`in (...)`、`values (...)`）按 `expressionWidth` 每行打包多条 |
+| `adbSqlFormatter.packConditions` | `true` | `where` / `having` / `on` 里同列或同运算符的条件合到一行 |
 | `adbSqlFormatter.notifyOnFormatError` | `true` | 排版失败（一般是语法错）时，在出错行画波浪线并弹一条带原因的提示；关掉则完全安静（文件照旧按原样保存） |
 
 ## 本地化

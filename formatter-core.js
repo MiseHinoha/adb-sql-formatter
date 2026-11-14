@@ -1081,6 +1081,486 @@ function applyStructureIndent(text, mode) {
 }
 
 // ---------------------------------------------------------------------------
+// 换行策略：A 长逗号列表按行宽打包 / B 短括号块合回一行 / C 条件同类合行
+// 三步都放在 reformatDdl 之后 —— 那时缩进与对齐都已是最终形态，行宽才算得准。
+// 共同约束（三条规则各自都要能独立守住）：
+//   1. 只改换行与空白，不改任何 token：运算符顺序、括号结构一律不动；
+//   2. 带行内注释的块一律不动 —— 拼到一行会把后面的内容吞进注释里；
+//   3. 跨行字符串 / 块注释内部一律不动（那是数据，不是空白）；
+//   4. create table 整段跳过 —— 列定义对齐是本扩展的既有产出。
+// ---------------------------------------------------------------------------
+
+// 行宽：tab 按 tabWidth 展开，中日韩字符按 2 列（复用 DDL 对齐那套 dispWidth）
+function lineWidth(text, tabWidth) {
+	return dispWidth(String(text).split('\t').join(' '.repeat(tabWidth)));
+}
+
+function indentOfLine(line) {
+	const m = line.match(/^[ \t]*/);
+	return m ? m[0] : '';
+}
+
+// 每行是否落在 create table 语句里（DDL 整体跳过）
+function createTableFlags(lines) {
+	const flags = new Array(lines.length).fill(false);
+	let inDdl = false;
+	for (let i = 0; i < lines.length; i++) {
+		if (/^\s*create\s+table\b/i.test(lines[i])) inDdl = true;
+		flags[i] = inDdl;
+		if (inDdl && /;\s*$/.test(lines[i])) inDdl = false;
+	}
+	return flags;
+}
+
+// 引号之外的注释（`--` 或未闭合的 `/*`）：带注释的行不许参与任何拼行
+function hasCommentOutsideQuote(line) {
+	let quote = null;
+	for (let i = 0; i < line.length; i++) {
+		const c = line[i];
+		if (quote) {
+			if (c === quote && line[i - 1] !== '\\') quote = null;
+			continue;
+		}
+		if (c === "'" || c === '"' || c === '`') {
+			quote = c;
+			continue;
+		}
+		if (c === '-' && line[i + 1] === '-') return true;
+		if (c === '/' && line[i + 1] === '*') {
+			const end = line.indexOf('*/', i + 2);
+			if (end < 0) return true;
+			i = end + 1;
+		}
+	}
+	return false;
+}
+
+// ---------------------------------------------------------------------------
+// 规则 A：逐条一行的逗号列表按行宽打包
+// 只认「`<前缀>(` 收行的开口行 + 每行 `, 条目`（首条不带逗号）+ 纯 `)` 收尾行」这一种形态。
+// 条目自己就超宽时退化成一行一条，不会比现在更差。
+// ---------------------------------------------------------------------------
+function readCommaListBlock(lines, i, ddlFlags) {
+	if (ddlFlags[i]) return null;
+	const line = lines[i];
+	if (!line.includes('(') || !/[(,]\s*$/.test(line)) return null;
+	if (hasCommentOutsideQuote(line)) return null;
+	if (i + 1 >= lines.length) return null;
+	const firstLine = lines[i + 1];
+	if (!firstLine.trim() || /^\s*,/.test(firstLine)) return null;
+	if (hasCommentOutsideQuote(firstLine)) return null;
+	const items = [firstLine.trim()];
+	let j = i + 2;
+	while (j < lines.length && /^\s*,/.test(lines[j])) {
+		if (hasCommentOutsideQuote(lines[j])) return null;
+		items.push(lines[j].trim().replace(/^,\s*/, ''));
+		j++;
+	}
+	if (j >= lines.length || hasCommentOutsideQuote(lines[j])) return null;
+	// 收尾行只有 `)` / `);` / `) then 1` 这类形态（右边不允许再出现括号）
+	const close = lines[j].match(/^[ \t]*\)([^()]*)$/);
+	if (!close) return null;
+	return { items, closeTail: close[1], itemIndent: indentOfLine(firstLine), endLine: j };
+}
+
+function packLongCommaLists(text, width, tabWidth) {
+	const lines = text.split('\n');
+	const ddlFlags = createTableFlags(lines);
+	const out = [];
+	for (let i = 0; i < lines.length; i++) {
+		const block = readCommaListBlock(lines, i, ddlFlags);
+		if (!block || block.items.length < 2) {
+			out.push(lines[i]);
+			continue;
+		}
+		const { items, closeTail, itemIndent, endLine } = block;
+		// 整段能塞进一行就直接一行（含收尾括号与尾随的 `;`）
+		const single = lines[i].replace(/[ \t]+$/, '') + items.join(', ') + ')' + closeTail;
+		if (lineWidth(single, tabWidth) <= width) {
+			out.push(single);
+			i = endLine;
+			continue;
+		}
+		const indentW = lineWidth(itemIndent, tabWidth);
+		const packed = [];
+		let cur = '';
+		for (const item of items) {
+			if (cur && indentW + lineWidth(cur + ', ' + item, tabWidth) > width) {
+				packed.push(cur);
+				cur = '';
+			}
+			cur = cur ? cur + ', ' + item : item;
+		}
+		if (cur) packed.push(cur);
+		if (packed.length >= items.length) {
+			out.push(lines[i]);
+			i = endLine;
+			continue;
+		}
+		out.push(lines[i]);
+		// 首行不带前置逗号，续行沿用 commaPosition=before 的 `, ` 风格
+		packed.forEach((p, idx) => out.push(itemIndent + (idx === 0 ? p : ', ' + p)));
+		out.push(lines[endLine]);
+		i = endLine;
+	}
+	return out.join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// 规则 B：短括号块合回一行（条件分组 / 子查询 / CTE 体 / 派生表）
+// 从最内层往外合，整行宽度（含缩进）不超过 expressionWidth 才合；
+// 合完仍然超宽就保持多行 —— 所以长条件会停在「or 分组各占一行」这种可读粒度。
+// ---------------------------------------------------------------------------
+function flattenBlockText(blockText) {
+	let out = '';
+	let quote = null;
+	let pending = false;
+	const pad = () => {
+		if (pending && out && !out.endsWith('(') && !out.endsWith(', ')) out += ' ';
+		pending = false;
+	};
+	for (let i = 0; i < blockText.length; i++) {
+		const c = blockText[i];
+		if (quote) {
+			out += c;
+			if (c === quote && blockText[i - 1] !== '\\') quote = null;
+			continue;
+		}
+		if (c === "'" || c === '"' || c === '`') {
+			pad();
+			quote = c;
+			out += c;
+			continue;
+		}
+		if (c === ' ' || c === '\t' || c === '\n' || c === '\r') {
+			pending = true;
+			continue;
+		}
+		if (c === ',' || c === ')') {
+			out = out.replace(/[ \t]+$/, '');
+			pending = false;
+			out += c === ',' ? ', ' : ')';
+			continue;
+		}
+		if (c === '(') {
+			pad();
+			out += '(';
+			continue;
+		}
+		pad();
+		out += c;
+	}
+	return out.replace(/[ \t]+$/, '').replace(/[ \t]+\)/g, ')');
+}
+
+// 从 (lineIdx, col) 的左括号找到配对的右括号；带注释 / 跨行字符串 / 进了 DDL 一律放弃
+function findBlockEnd(lines, lineIdx, col, ddlFlags) {
+	let depth = 0;
+	let quote = null;
+	for (let i = lineIdx; i < lines.length; i++) {
+		if (ddlFlags[i] && i > lineIdx) return null;
+		const seg = i === lineIdx ? lines[i].slice(col) : lines[i];
+		for (let k = 0; k < seg.length; k++) {
+			const c = seg[k];
+			if (quote) {
+				if (c === quote && seg[k - 1] !== '\\') quote = null;
+				continue;
+			}
+			if (c === "'" || c === '"' || c === '`') {
+				quote = c;
+				continue;
+			}
+			if (c === '-' && seg[k + 1] === '-') return null;
+			if (c === '/' && seg[k + 1] === '*') return null;
+			if (c === '(') depth++;
+			else if (c === ')') {
+				depth--;
+				if (depth === 0) return { line: i, col: k };
+			}
+		}
+		if (quote) return null; // 跨行字符串：合行会改到字面量内容
+	}
+	return null;
+}
+
+function collapseShortBlocks(text, width, tabWidth) {
+	let lines = text.split('\n');
+	// 一轮只合一层（内层先合，外层下一轮再判），嵌套深度有限，轮数不会失控
+	for (let pass = 0; pass < 8; pass++) {
+		const joined = lines.join('\n');
+		const ddlFlags = createTableFlags(lines);
+		const literalFlags = startsInLiteral(joined);
+		let changed = false;
+		for (let i = 0; i < lines.length; i++) {
+			if (ddlFlags[i] || literalFlags[i]) continue;
+			const line = lines[i];
+			let quote = null;
+			let collapsed = false;
+			for (let k = 0; k < line.length && !collapsed; k++) {
+				const c = line[k];
+				if (quote) {
+					if (c === quote && line[k - 1] !== '\\') quote = null;
+					continue;
+				}
+				if (c === "'" || c === '"' || c === '`') {
+					quote = c;
+					continue;
+				}
+				if (c === '-' && line[k + 1] === '-') break;
+				if (c === '/' && line[k + 1] === '*') break;
+				if (c !== '(') continue;
+				const end = findBlockEnd(lines, i, k, ddlFlags);
+				if (!end || end.line === i) continue;
+				const inner = lines.slice(i, end.line + 1);
+				inner[0] = line.slice(k);
+				inner[inner.length - 1] = lines[end.line].slice(0, end.col + 1);
+				const single =
+					line.slice(0, k) + flattenBlockText(inner.join('\n')) + lines[end.line].slice(end.col + 1);
+				if (lineWidth(single, tabWidth) > width) continue;
+				lines = lines.slice(0, i).concat([single], lines.slice(end.line + 1));
+				changed = true;
+				collapsed = true;
+			}
+		}
+		if (!changed) break;
+	}
+	return lines.join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// 规则 C：where / having / join … on 的条件链「同类同义尽量同线」
+// 同类判定只看相邻两条，且不跨 and/or：
+//   ① 同一个左值（`dt >= …` 与 `dt <= …`）—— 同义；
+//   ② 同一个运算符（都 `=` / 都 `in` / 都 `between`）—— 同类。
+// 先按同类黏成簇，再整簇按行宽装填（整簇放不下一行时才拆）。
+// ---------------------------------------------------------------------------
+function condTopicOf(text) {
+	const t = text.replace(/[;,]\s*$/, '').trim();
+	const m = t.match(/^(.+?)\s+(not\s+in|not\s+like|is\s+not|=|<>|!=|>=|<=|>|<|in|like|is|between)\s/i);
+	if (!m) return null;
+	let op = m[2].toLowerCase().replace(/\s+/g, ' ');
+	if (op === '!=') op = '<>';
+	if (op === 'is not') op = 'is';
+	return { subject: m[1].replace(/\s+/g, ' ').toLowerCase(), op };
+}
+
+function condSameTopic(a, b) {
+	if (!a || !b) return false;
+	return a.subject === b.subject || a.op === b.op;
+}
+
+function splitCondJoiner(line) {
+	const m = line.match(/^([ \t]*)(and|or)\s+(.*)$/i);
+	if (!m) return null;
+	return { pad: m[1], joiner: m[2].toLowerCase(), body: m[3] };
+}
+
+const COND_CLAUSE_KEYWORDS = [
+	'where', 'having', 'on', 'from', 'group by', 'order by', 'limit', 'offset', 'window',
+	'left join', 'right join', 'inner join', 'full join', 'cross join', 'join',
+	'union all', 'union', 'select', 'with', 'set', 'values', 'insert', 'create table',
+];
+
+function isCondClauseHead(line) {
+	const t = line.trim().toLowerCase();
+	if (/^(and|or)\s/.test(t)) return false;
+	return COND_CLAUSE_KEYWORDS.some((k) => t === k || t.startsWith(k + ' '));
+}
+
+// 把 head 行拆成「前缀 + 条件正文」：`where x` / `having x` / `join b on x`
+function splitCondHead(line) {
+	const m = line.match(/^([ \t]*(?:[a-z]+ )*?)(on|where|having)\s+(.*)$/i);
+	if (!m) return null;
+	return { prefix: m[1] + m[2] + ' ', body: m[3] };
+}
+
+// 逐行跟踪括号深度（条件块里的括号自成一层，块内不当作 and/or 拆行点）
+function depthScanner() {
+	let depth = 0;
+	let quote = null;
+	return (line) => {
+		const start = depth;
+		for (let i = 0; i < line.length; i++) {
+			const c = line[i];
+			if (quote) {
+				if (c === quote && line[i - 1] !== '\\') quote = null;
+				continue;
+			}
+			if (c === "'" || c === '"' || c === '`') {
+				quote = c;
+				continue;
+			}
+			if (c === '-' && line[i + 1] === '-') break;
+			if (c === '(') depth++;
+			else if (c === ')') depth = Math.max(0, depth - 1);
+		}
+		return start;
+	};
+}
+
+// 收集一个条件子句：head 单元 + 每条 and/or 单元（单元可跨多行，如已打包的 IN 列表）
+function collectCondUnits(lines, i, ddlFlags) {
+	if (ddlFlags[i] || hasCommentOutsideQuote(lines[i])) return null;
+	const head = splitCondHead(lines[i]);
+	if (!head) return null;
+	const nextDepth = depthScanner();
+	nextDepth(lines[i]);
+	const units = [
+		{ prefix: head.prefix, body: head.body, joiner: null, topic: condTopicOf(head.body), extra: [] },
+	];
+	let cur = units[0];
+	let j = i + 1;
+	let contPad = null;
+	while (j < lines.length) {
+		const line = lines[j];
+		if (hasCommentOutsideQuote(line)) return null;
+		const d = nextDepth(line);
+		const sp = d === 0 ? splitCondJoiner(line) : null;
+		if (sp) {
+			if (contPad === null) {
+				if (sp.pad.length < indentOfLine(lines[i]).length) break;
+				contPad = sp.pad;
+			}
+			if (sp.pad === contPad) {
+				cur = { prefix: sp.pad + sp.joiner + ' ', body: sp.body, joiner: sp.joiner, topic: condTopicOf(sp.body), extra: [] };
+				units.push(cur);
+				j++;
+				continue;
+			}
+		}
+		if (d === 0 && isCondClauseHead(line)) break;
+		cur.extra.push(line);
+		j++;
+	}
+	if (units.length < 2) return null;
+	return { units, endLine: j - 1, pad: units[1].prefix.match(/^[ \t]*/)[0] };
+}
+
+function packConditions(text, width, tabWidth) {
+	const lines = text.split('\n');
+	const ddlFlags = createTableFlags(lines);
+	const out = [];
+	for (let i = 0; i < lines.length; i++) {
+		const info = collectCondUnits(lines, i, ddlFlags);
+		if (!info) {
+			out.push(lines[i]);
+			continue;
+		}
+		const { units, endLine, pad } = info;
+		const meta = units.map((u) => ({
+			single: u.extra.length === 0,
+			prefix: u.prefix,
+			body: u.body,
+			joiner: u.joiner,
+			topic: u.topic,
+			extra: u.extra,
+		}));
+
+		// 同类黏成簇
+		const clusters = [];
+		meta.forEach((m, k) => {
+			if (k === 0) {
+				clusters.push([m]);
+				return;
+			}
+			const prev = meta[k - 1];
+			const last = clusters[clusters.length - 1];
+			const canGlue =
+				m.single &&
+				prev.single &&
+				m.joiner === prev.joiner &&
+				condSameTopic(prev.topic, m.topic) &&
+				last.every((x) => x.single && x.joiner === m.joiner);
+			if (canGlue) last.push(m);
+			else clusters.push([m]);
+		});
+
+		let cur = meta[0].prefix + meta[0].body;
+		let hasUnit = false;
+		let blocked = !meta[0].single;
+		const flush = () => {
+			if (cur !== null) out.push(cur);
+			cur = null;
+			hasUnit = false;
+			blocked = false;
+		};
+		if (blocked) {
+			// head 行自带多行块：head + 块内容原样送出，后续条件另起一行
+			out.push(cur);
+			for (const l of meta[0].extra) out.push(l);
+			cur = null;
+			blocked = false;
+		}
+
+		for (let ci = 1; ci < clusters.length; ci++) {
+			const cl = clusters[ci];
+			if (cl.some((m) => !m.single)) {
+				// 含多行单元：先收行，再逐个送出（多行块原样；单行单元各自装填）
+				if (cur !== null) flush();
+				for (const m of cl) {
+					if (!m.single) {
+						if (cur) {
+							out.push(cur);
+							cur = null;
+						}
+						out.push(m.prefix + m.body);
+						for (const l of m.extra) out.push(l);
+						continue;
+					}
+					const add = ' ' + m.joiner + ' ' + m.body;
+					if (cur !== null && lineWidth(cur + add, tabWidth) > width) {
+						out.push(cur);
+						cur = null;
+					}
+					cur = cur !== null ? cur + add : m.prefix + m.body;
+					hasUnit = true;
+				}
+				continue;
+			}
+			const joined = cl
+				.map((m, k) => (k === 0 ? m.joiner + ' ' + m.body : ' ' + m.joiner + ' ' + m.body))
+				.join('');
+			if (cur !== null && !blocked && lineWidth(cur + ' ' + joined, tabWidth) <= width) {
+				cur += ' ' + joined;
+				hasUnit = true;
+				continue;
+			}
+			// 整簇单独一行放得下、而当前行已有条件 → 换行让它独占（同类不被拆开）
+			if (cur !== null && hasUnit && lineWidth(pad + joined, tabWidth) <= width) {
+				flush();
+				cur = pad + joined;
+				hasUnit = true;
+				continue;
+			}
+			for (const m of cl) {
+				const add = ' ' + m.joiner + ' ' + m.body;
+				if (cur !== null && !blocked && lineWidth(cur + add, tabWidth) <= width) {
+					cur += add;
+					hasUnit = true;
+					continue;
+				}
+				if (cur !== null) flush();
+				cur = m.prefix + m.body;
+				hasUnit = true;
+			}
+		}
+		if (cur !== null) flush();
+		i = endLine;
+	}
+	return out.join('\n');
+}
+
+// 三步串起来：短块合行 → 长列表打包 → 条件同类合行（顺序不能换：先合块，列表与条件的宽度才是最终值）
+function applyWrapRules(text, cfg, tabWidth) {
+	const width = cfg.expressionWidth || 100;
+	let out = text;
+	if (cfg.wrapShortBlocks !== false) out = collapseShortBlocks(out, width, tabWidth);
+	if (cfg.packLongLists !== false) out = packLongCommaLists(out, width, tabWidth);
+	if (cfg.packConditions !== false) out = packConditions(out, width, tabWidth);
+	return out;
+}
+
+// ---------------------------------------------------------------------------
 // 换行符归一：核心只认 \n
 // sql-formatter 会把块注释内容原样带出 —— CRLF 文档里注释正文的 \r 就这样活到输出里，
 // 而后面每一环（toTabs / joinShortLists / reformatDdl）都按 \n 切分再 join，
@@ -1125,7 +1605,9 @@ function formatSql(text, cfg, tabWidth) {
 	const windowed = inlineWindowSpecs(merged, cfg.expressionWidth);
 	// 结构缩进（可选）：flat = 现状；nested / nested-on 见 applyStructureIndent
 	const indented = applyStructureIndent(windowed, cfg.indentMode || 'flat');
-	return restoreParams(normalizeEol(reformatDdl(indented)), guarded.marks);
+	// 换行策略：短括号块合行 → 长逗号列表打包 → 条件同类合行（必须在 reformatDdl 之后，行宽才准）
+	const wrapped = applyWrapRules(reformatDdl(indented), cfg, tabWidth);
+	return restoreParams(normalizeEol(wrapped), guarded.marks);
 }
 
 // ---------------------------------------------------------------------------
@@ -1184,5 +1666,12 @@ module.exports = {
 		startsInLiteral,
 		topLevelOnIndex,
 		describeFormatError,
+		lineWidth,
+		createTableFlags,
+		hasCommentOutsideQuote,
+		packLongCommaLists,
+		collapseShortBlocks,
+		packConditions,
+		applyWrapRules,
 	},
 };

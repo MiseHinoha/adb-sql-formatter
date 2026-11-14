@@ -477,7 +477,7 @@ async function runSaveTests() {
 	// ---- 1.6.0：结构缩进开关（indentMode）接线 ----
 	{
 		const sql =
-			'select a.id from ods_user a left join ods_order b on a.id = b.user_id where a.dt = 1 and b.status = 1';
+			"select a.id from ods_user a left join ods_order b on a.id = b.user_id where a.dt = 1 and a.note = '一个很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长的值' and b.status = 1";
 		const levelOf = (text, needle) => {
 			const line = text.split('\n').find((l) => l.trim().startsWith(needle));
 			return line === undefined ? -1 : (line.match(/^\t*/) || [''])[0].length;

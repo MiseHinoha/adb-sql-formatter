@@ -9,6 +9,9 @@
 	"adbSqlFormatter.takeOverSaveKey": "在 sql / mysql 编辑器里接管 Ctrl+S / Cmd+S：先格式化再保存。若这个键该归你的键位方案，关掉它即可（改用命令「格式化并保存」或自己绑一个键）。",
 	"adbSqlFormatter.notifyOnFormatError": "排版失败时（一般是语法错）在出错行画波浪线并弹一条提示，而不是静默地按原样保存。关掉则完全安静。",
 	"adbSqlFormatter.indentMode": "from / join / where 这些行的缩进形态。flat 保持以前的样子（子句、join、and/or 续行全在同一列）；nested 让每个 join、每条 and/or 续行相对所属子句缩进一级；nested-on 再把每个 join 的 on 条件单独成行（最深、最啰嗦）。",
+	"adbSqlFormatter.wrapShortBlocks": "整行宽度（expressionWidth）放得下时，把括号块（条件分组、子查询、CTE 体、派生表）合回一行。带注释、跨行字符串、建表列定义一律不动。",
+	"adbSqlFormatter.packLongLists": "长逗号列表（where x in (...)、values (...)）按行宽每行打包多条，不再一条一行。带注释的列表不动；整段放得下就保持一行。",
+	"adbSqlFormatter.packConditions": "where / having / on 里同类同义的条件合到一行：同列条件（dt >= ... and dt <= ...）或同运算符条件（=、in、between）先归组，再按行宽装填。条件顺序与运算符一律不改。",
 	"adbSqlFormatter.command.formatAndSave": "格式化并保存",
 	"adbSqlFormatter.command.formatDocument": "格式化文档（ADB SQL Formatter）"
 }

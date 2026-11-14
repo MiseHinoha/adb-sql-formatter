@@ -56,6 +56,17 @@ On the DML side:
   parentheses: `nvl(a, 0)`. The space in table-position lists (`insert into t (a, b)`) is preserved
 - Indentation is always emitted as tabs
 - `--` and `/* */` comments are preserved verbatim
+- Long comma lists are packed to the screen width: when a list like `where x in (...)` does not fit on
+  one line, each line is filled up to `expressionWidth` (50 ids drop from 51 lines to 3); a list that
+  fits stays on one line
+- Parenthesised blocks that fit on one line are collapsed again: condition groups, subqueries inside a
+  predicate, short CTE bodies and derived tables — they only stay multi-line when the line would exceed
+  `expressionWidth`
+- Same-kind conditions share a line: in `where` / `having` / `on`, conditions on the same column
+  (`dt >= …` and `dt <= …`) or with the same operator (`=` / `in` / `between`) are merged — lines only,
+  the condition order and operators are never touched
+- All three wrapping rules are guarded: blocks with inline comments, multi-line strings and
+  `create table` column lists are always left alone
 
 ## Semicolon policy
 
@@ -209,6 +220,9 @@ two things — **formatting** and a **missing-semicolon hint**. Its diagnostics 
 | `adbSqlFormatter.takeOverSaveKey` | `true` | Take over `Ctrl/Cmd+S` while the setting above is on; off means relying on the save hook, which other keymaps can bypass |
 | `adbSqlFormatter.requireSemicolonBetweenStatements` | `true` | Missing-semicolon check for multi-statement files |
 | `adbSqlFormatter.missingSemicolonSeverity` | `warning` | Set to `error` to mark it red |
+| `adbSqlFormatter.wrapShortBlocks` | `true` | Collapse a parenthesised block (condition group, subquery, CTE body, derived table) onto one line when the line fits |
+| `adbSqlFormatter.packLongLists` | `true` | Pack long comma lists (`in (...)`, `values (...)`) several items per line up to `expressionWidth` |
+| `adbSqlFormatter.packConditions` | `true` | Merge same-column / same-operator conditions of `where` / `having` / `on` onto one line |
 
 ## Localization
 

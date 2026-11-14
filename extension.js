@@ -39,6 +39,10 @@ function getConfig() {
 		// 结构缩进形态：flat / nested / nested-on（核心 applyStructureIndent 实现）。
 		// 默认 nested：子句里的 join 与 and/or 续行各深一级；想回到「全部同一列」就设成 flat。
 		indentMode: c.get('indentMode', 'nested'),
+		// 换行策略三开关（核心 applyWrapRules）：短括号块合行 / 长列表按行宽打包 / 条件同类合行。
+		wrapShortBlocks: c.get('wrapShortBlocks', true),
+		packLongLists: c.get('packLongLists', true),
+		packConditions: c.get('packConditions', true),
 	};
 }
 

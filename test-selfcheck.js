@@ -273,6 +273,18 @@ const structured = [
 	'and c.city in (\'北京\', \'上海\');',
 ].join('\n');
 const flatOut = formatSql(structured, cfg, 4);
+// 撑爆行宽的条件链：用于验证 nested 模式下 and 续行的缩进（短条件会被同类合行并掉）
+const nestedLong = formatSql(
+	[
+		'select a.id',
+		'from ods_user a',
+		"where a.dt = '${bizdate}'",
+		"and a.note = '这是一条很长很长很长很长很长很长很长很长很长很长很长很长的条件'",
+		'and b.status = 1;',
+	].join('\n'),
+	{ ...cfg, indentMode: 'nested' },
+	4
+);
 const nestedOut = formatSql(structured, { ...cfg, indentMode: 'nested' }, 4);
 const nestedOnOut = formatSql(structured, { ...cfg, indentMode: 'nested-on' }, 4);
 const indentOf = (text, needle) => {
@@ -286,8 +298,9 @@ check(
 		indentOf(flatOut, 'left join') === 1 &&
 		indentOf(nestedOut, 'from') === 1 &&
 		indentOf(nestedOut, 'left join') === 2 &&
-		indentOf(nestedOut, 'and b.status') === 2,
-	JSON.stringify([indentOf(nestedOut, 'from'), indentOf(nestedOut, 'left join'), indentOf(nestedOut, 'and b.status')])
+		// 条件链会被 1.7.0 的「同类合行」并掉，所以 and 续行的缩进单独用一条撑爆行宽的条件验
+		indentOf(nestedLong, 'and b.status') === 2,
+	JSON.stringify([indentOf(nestedOut, 'from'), indentOf(nestedOut, 'left join'), indentOf(nestedLong, 'and b.status')])
 );
 check(
 	'结构缩进：nested-on 再把 on 条件拆成独立一行、比 join 深一级',
@@ -368,6 +381,112 @@ check('占位符：代码骨架不变', phOut !== '' && skeleton(phOut) === skel
 	check('建表：表名里的 $ 不被吃掉', out.indexOf(name) === 0 || out.split('\n')[0].indexOf(name) >= 0, JSON.stringify(out.split('\n')[0] || ''));
 	check('建表：带 $ 的表名二次格式化幂等', out !== '' && formatSql(out, cfg, 4) === out);
 });
+
+// 1.7.0 换行策略：A 长逗号列表按行宽打包 / B 短括号块合回一行 / C 条件同类同义合行
+console.log('');
+const wrapCfg = (opts) => Object.assign({}, cfg, { indentMode: 'nested' }, opts || {});
+const maxLineWidth = (text) => Math.max(...text.split('\n').map((l) => l.replace(/\t/g, '    ').length));
+const IN50 = Array.from({ length: 50 }, (_, i) => i + 1).join(',');
+const in50Src = `select order_id from t_order where shop_id in (${IN50}) and dt = '20261101';`;
+const in50Out = formatSql(in50Src, wrapCfg(), 4);
+
+check('长列表：50 个数字不再一条一行', in50Out.split('\n').length <= 12, in50Out.split('\n').length + ' 行');
+check('长列表：每行不超过 expressionWidth', maxLineWidth(in50Out) <= 100, maxLineWidth(in50Out));
+check('长列表：条目一个不丢（骨架不变）', skeleton(in50Out) === skeleton(in50Src));
+check('长列表：二次格式化幂等', formatSql(in50Out, wrapCfg(), 4) === in50Out);
+check(
+	'长列表：续行沿用前置逗号风格',
+	/\n\t\t, 26, 27/.test(in50Out) && /\n\t\t1, 2, 3/.test(in50Out),
+	JSON.stringify(in50Out.split('\n').slice(4, 7))
+);
+check(
+	'短列表：整段放得下就一行',
+	/\bin \('gz', 'sz', 'sh'\)/.test(formatSql("select * from t where city in ('gz', 'sz', 'sh');", wrapCfg(), 4))
+);
+
+// 守卫：带行内注释的列表不动（拼行会把后面的条目吞进注释）
+const commentedOut = formatSql('select * from t where a in (\n1, -- one\n2, -- two\n3\n);', wrapCfg(), 4);
+check(
+	'长列表：带行内注释的列表原样不动',
+	commentedOut.split('\n').filter((l) => l.indexOf('--') >= 0).length === 2 && /\n\t\t, 2 -- two/.test(commentedOut),
+	JSON.stringify(commentedOut.split('\n').slice(3))
+);
+
+// B：短括号块合回一行
+const parenOut = formatSql('select a from t where ((a = 1 and b = 2) or (c = 3 and d = 4));', wrapCfg(), 4);
+check(
+	'短块：条件分组压成一行',
+	/\n\twhere \(\(a = 1 and b = 2\) or \(c = 3 and d = 4\)\);/.test(parenOut),
+	JSON.stringify(parenOut.split('\n').slice(3))
+);
+check(
+	'短块：条件里的子查询压成一行',
+	/in \(select id from t_user where level > 3\)/.test(
+		formatSql("select * from t_order o where o.user_id in (select id from t_user where level > 3) and o.dt = '20261101';", wrapCfg(), 4)
+	)
+);
+check(
+	'短块：CTE 体压成一行',
+	/base as \(select id, name from t_user where dt = 1\)/.test(
+		formatSql('with base as (select id, name from t_user where dt = 1) select * from base;', wrapCfg(), 4)
+	)
+);
+const longCte =
+	"with base as (select id, user_name, shop_code, city_code, order_cnt, pay_amt, refund_amt, dt from t_user_wide where dt between '20260101' and '20261101' and status = 1) select * from base;";
+check('短块：压平后仍超宽的块保持多行', formatSql(longCte, wrapCfg(), 4).split('\n').length > 8);
+
+// C：条件同类同义合行
+const condSrc =
+	"select o.order_id from t_order o where o.dt >= '20260101' and o.dt <= '20260131' and o.status = 1 and o.pay_status = 2 and o.city_code = '440300' and o.order_amt > 100;";
+const condOut = formatSql(condSrc, wrapCfg(), 4);
+check(
+	'条件合行：同列区间条件同一行',
+	/o\.dt >= '20260101' and o\.dt <= '20260131'/.test(condOut),
+	JSON.stringify(condOut.split('\n').slice(3))
+);
+check(
+	'条件合行：同运算符条件同一行',
+	/o\.status = 1 and o\.pay_status = 2 and o\.city_code = '440300'/.test(condOut),
+	JSON.stringify(condOut.split('\n').slice(3))
+);
+check('条件合行：骨架不变（运算符顺序不动）', skeleton(condOut) === skeleton(condSrc));
+check('条件合行：二次格式化幂等', formatSql(condOut, wrapCfg(), 4) === condOut);
+const mixSrc = 'select * from t where a = 1 and b = 2 or c = 3 and d = 4 or e = 5;';
+check(
+	'条件合行：and/or 混排只改行不改结构',
+	skeleton(formatSql(mixSrc, wrapCfg(), 4)) === skeleton(mixSrc) && /a = 1 and b = 2 or c = 3/.test(formatSql(mixSrc, wrapCfg(), 4))
+);
+check(
+	'条件合行：带行内注释的条件整段不动',
+	formatSql('select * from t where a = 1 -- 主键\nand b = 2\nand c = 3;', wrapCfg(), 4).split('\n').filter((l) => /^\t+and /.test(l)).length === 2
+);
+
+// 守卫：建表语句整段跳过（列定义对齐是既有产出）
+const ddlGuardSrc =
+	"create table t_demo (id bigint not null comment '主键', user_name varchar(64) not null comment '用户名', pay_amt decimal(18,2) null default 0 comment '金额') distributed by hash(id);";
+const ddlGuardOut = formatSql(ddlGuardSrc, wrapCfg(), 4);
+check('守卫：建表列定义不被压成一行', ddlGuardOut.split('\n').length >= 6, ddlGuardOut.split('\n').length + ' 行');
+check('守卫：建表语句二次格式化幂等', formatSql(ddlGuardOut, wrapCfg(), 4) === ddlGuardOut);
+
+// 守卫：跨行字符串内部不动（合行会把两行并成一行 = 改数据）
+const mlOut = formatSql("select a.id, a.note from ods_user a where a.note in ('第一行\n第二行') and a.x > 0;", wrapCfg(), 4);
+check('守卫：跨行字符串内部原样', mlOut.indexOf("'第一行\n第二行'") >= 0, JSON.stringify(mlOut));
+
+// 宽度档位：80 / 120 都守住上限
+[80, 120].forEach((w) => {
+	const out = formatSql(in50Src, wrapCfg({ expressionWidth: w }), 4);
+	check(`宽度 ${w}：每行不超上限`, maxLineWidth(out) <= w, maxLineWidth(out));
+});
+
+// 开关：三条规则关掉即退回 1.6.x 的逐条一行
+const legacyCfg = wrapCfg({ wrapShortBlocks: false, packLongLists: false, packConditions: false });
+const legacyOut = formatSql(in50Src, legacyCfg, 4);
+check('开关：三条规则关闭后列表逐条一行', legacyOut.split('\n').length >= 40, legacyOut.split('\n').length + ' 行');
+check('开关：关闭后仍幂等', formatSql(legacyOut, legacyCfg, 4) === legacyOut);
+check(
+	'开关：关闭后条件不再合行',
+	formatSql('select a from t where ((a = 1 and b = 2) or (c = 3 and d = 4));', legacyCfg, 4).split('\n').length >= 10
+);
 
 // 缺分号检测：fixture 里最后一条没有分号，属「末条不报」，前面几条都带分号
 const ddlText = fs.readFileSync(path.join(fixtureDir, 'ddl.sql'), 'utf8');
